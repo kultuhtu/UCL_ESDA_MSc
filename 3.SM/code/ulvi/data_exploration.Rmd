@@ -1,0 +1,386 @@
+---
+title: "Data Exploration"
+author: "Ulvi"
+date: "11/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Exploration
+
+#### Import libraries
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+
+set.seed(100) # For reproducibility
+```
+
+#### Load data
+
+```{r}
+df_consumption_daily_2011_2012 <- read_csv(
+  "household_consumption_2011_2012_daily.csv", show_col_types = FALSE)
+df_consumption_daily_2013 <- read_csv(
+  "household_consumption_2013_daily.csv", show_col_types = FALSE)
+df_consumption_daily_2014 <- read_csv(
+  "household_consumption_2014_daily.csv", show_col_types = FALSE)
+df_households <- read_csv("../data/household_information.csv", 
+                          show_col_types = FALSE)
+df_weather_daily <- read_csv("../data/weather_daily.csv", 
+                             show_col_types = FALSE)
+```
+
+## Plotting
+
+#### Consumption
+
+##### Daily
+
+```{r}
+df_consumption_daily <- rbind(df_consumption_daily_2011_2012, 
+                              df_consumption_daily_2013, 
+                              df_consumption_daily_2014)
+# Select only household ID, date, and average daily consumption
+df_consumption_daily <- df_consumption_daily %>% 
+  select(LCLid, date, kwh_per_hh_avg, kwh_per_hh_sum)
+head(df_consumption_daily)
+```
+
+```{r}
+ggplot(data=df_consumption_daily, aes(x=date, y=kwh_per_hh_sum)) +
+  geom_line(alpha=0.5, color="#69b3a2")+
+  xlab("") + ylab("Average daily consumption (kwg/hh)") +
+  xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  theme_light()+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+##### Monthly
+
+```{r}
+df_consumption_daily$month <- month(df_consumption_daily$date)
+head(df_consumption_daily)
+```
+
+```{r}
+df_consumption_monthly <- df_consumption_daily %>% 
+  group_by(LCLid, month) %>% summarise(kwh_per_hh_sum = sum(kwh_per_hh_sum, 
+                                                            na.rm = TRUE)) %>% 
+  ungroup()
+
+df_consumption_monthly <- aggregate(kwh_per_hh_sum ~ month, data=df_consumption_monthly, mean)
+
+# Remove NAs
+df_consumption_monthly <- df_consumption_monthly %>% drop_na()
+
+head(df_consumption_monthly)
+```
+
+```{r}
+ggplot(data=df_consumption_monthly, aes(x=month, y=kwh_per_hh_sum)) +
+  #geom_area(alpha=1, color="#69b3a2")+
+  #geom_point()+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  geom_line(color="#69b3a2", size=1, alpha=0.9) +
+  xlab("") + ylab("Monthly consumption (kwg/hh)") +
+  xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+                            "6"="June","7"="July","8"="August","9"="September",
+                            "10"="October","11"="November","12"="December"))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Monthly Electricity Consumption (averaged between 2011 - 2014)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+##### Weekly
+
+```{r}
+df_consumption_daily$week <- week(df_consumption_daily$date)
+head(df_consumption_daily)
+```
+
+```{r}
+df_consumption_weekly <- df_consumption_daily %>% 
+  group_by(LCLid, week) %>% summarise(kwh_per_hh_sum = sum(kwh_per_hh_sum, 
+                                                            na.rm = TRUE)) %>% 
+  ungroup()
+
+head(df_consumption_weekly)
+```
+
+```{r}
+df_consumption_weekly <- aggregate(kwh_per_hh_sum ~ week, data=df_consumption_weekly, mean)
+
+# Remove NAs
+df_consumption_weekly <- df_consumption_weekly %>% drop_na()
+
+
+head(df_consumption_weekly)
+```
+
+```{r}
+ggplot(data=df_consumption_weekly, aes(x=week, y=kwh_per_hh_sum)) +
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  geom_line(color="#69b3a2", size=1,alpha=0.9) +
+  xlab("Week") + ylab("Average weekly consumption (kwg/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Weekly Electricity Consumption (averaged between 2011 - 2014)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+#### Weather
+
+##### Daily
+
+```{r}
+# Only select date and tavg
+df_weather_daily <- df_weather_daily %>% select(date, tavg)
+
+ggplot(data=df_weather_daily, aes(x=date, y=tavg)) +
+  geom_area( fill="#ffd589", alpha=0.8) +
+  geom_line(color="#ffd589", size=0.1) +
+  theme_light() +
+  xlab("") + ylab("Average daily temperature (C)") +
+  xlim(as.Date(c('2012-08-01','2013-02-01')))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  ggtitle("Daily Temperature (2011 - 2014)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+##### Monthly
+
+```{r}
+df_weather_daily$month <- month(df_weather_daily$date)
+head(df_weather_daily)
+```
+
+```{r}
+df_weather_monthly <- df_weather_daily %>% 
+  group_by(month) %>% summarise(tavg = mean(tavg,na.rm = TRUE)) %>% 
+  ungroup()
+
+df_weather_monthly <- aggregate(tavg ~ month, data=df_weather_monthly, mean)
+
+# Remove NAs
+df_weather_monthly <- df_weather_monthly %>% drop_na()
+
+head(df_weather_monthly)
+```
+
+```{r}
+ggplot(data=df_weather_monthly, aes(x=month, y=tavg)) +
+  #geom_area(alpha=1, color="#69b3a2")+
+  #geom_point()+
+  geom_area( fill="#ffd589", alpha=0.6) +
+  geom_line(color="#ffd589", size=1, alpha=0.9) +
+  xlab("") + ylab("Monthly Temperature (C)") +
+  xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+                            "6"="June","7"="July","8"="August","9"="September",
+                            "10"="October","11"="November","12"="December"))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Average Monthly Temperature (2011 - 2014)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+##### Weekly
+
+```{r}
+df_weather_daily$week <- week(df_weather_daily$date)
+head(df_weather_daily)
+```
+
+```{r}
+df_weather_weekly <- df_weather_daily %>% 
+  group_by(week) %>% summarise(tavg = mean(tavg, m = TRUE)) %>% 
+  ungroup()
+
+df_weather_weekly <- aggregate(tavg ~ week, data=df_weather_weekly, mean)
+
+# Remove NAs
+df_weather_weekly <- df_weather_weekly %>% drop_na()
+
+
+head(df_weather_weekly)
+```
+
+```{r}
+ggplot(data=df_weather_weekly, aes(x=week, y=tavg)) +
+  geom_area( fill="#ffd589", alpha=0.6) +
+  geom_line(color="#ffd589", size=1,alpha=0.9) +
+  xlab("Week") + ylab("Average weekly Temperature (C)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Weekly Temperature (averaged between 2011 - 2014)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+#### Cons + T
+
+##### Daily
+
+```{r}
+ggplot() +
+  geom_line(data=df_consumption_daily, aes(x=date, y=kwh_per_hh_sum), 
+            alpha=0.5,  color="#69b3a2") +
+  geom_area(data=df_weather_daily, aes(x=date, y=tavg), fill="#ffd589", alpha=0.6)+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  xlim(as.Date(c('2012-11-01','2013-02-01')))+
+  
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Average Daily Consumption vs Temperature (2011 - 2014)")#+
+  
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+```{r}
+df_joined_daily <- left_join(df_consumption_daily, df_weather_daily, by = "date")
+head(df_joined_daily)
+```
+
+```{r}
+ggplot() +
+  geom_line(data=df_joined_daily, aes(x=tavg, y=kwh_per_hh_avg), 
+            alpha=0.5,  color="#760000")+
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Average Daily Consumption vs Temperature (2011 - 2014)")#+
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+##### Monthly
+
+```{r}
+ggplot() +
+  # weather
+  geom_area(data=df_weather_monthly, aes(x=month, y=tavg),
+            fill="#ffd589", alpha=0.6) +
+  geom_line(data=df_weather_monthly, aes(x=month, y=tavg),
+            color="#ffd589", size=1, alpha=0.9)+
+  # temperature
+  geom_area(data=df_consumption_monthly,aes(x=month, y=kwh_per_hh_avg),
+            fill="#69b3a2", alpha=0.6) +
+  geom_line(data=df_consumption_monthly,aes(x=month, y=kwh_per_hh_avg),
+            color="#69b3a2", size=1, alpha=0.9) +
+  # aestethics
+  xlab("") + ylab("") +
+  xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+                            "6"="June","7"="July","8"="August","9"="September",
+                            "10"="October","11"="November","12"="December"))+
+  theme_light()+
+  ggtitle("T vs Consump (daily)")#+
+  
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+```{r}
+df_joined_monthly <- left_join(df_consumption_monthly, df_weather_monthly, by = "month")
+head(df_joined_monthly)
+```
+
+```{r}
+ggplot(data=df_joined_monthly, aes(x=tavg, y=kwh_per_hh_avg)) +
+  geom_area( fill="#760000", alpha=0.6) +
+  geom_line(color="#760000", size=0.9) +
+  #geom_point()+
+  #geom_line(alpha=0.3, color="#69b3a2")+
+  xlab("Temperature (C)") + ylab("Average monthly consumption (kw/hh)") +
+  theme_light()+
+  ggtitle("T vs Consump (monthly)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+##### Weekly
+
+```{r}
+ggplot() +
+  # weather
+  geom_area(data=df_weather_weekly, aes(x=week, y=tavg),
+            fill="#ffd589", alpha=0.6) +
+  geom_line(data=df_weather_weekly, aes(x=week, y=tavg),
+            color="#ffd589", size=1, alpha=0.9)+
+  # temperature
+  geom_area(data=df_consumption_weekly,aes(x=week, y=kwh_per_hh_avg*3),
+            fill="#69b3a2", alpha=0.6) +
+  geom_line(data=df_consumption_weekly,aes(x=week, y=kwh_per_hh_avg*3),
+            color="#69b3a2", size=1, alpha=0.9) +
+  # aestethics
+  xlab("Week") + ylab("") +
+  #xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+   #                         "6"="June","7"="July","8"="August","9"="September",
+  #                          "10"="October","11"="November","12"="December"))+
+  theme_light()+
+  ggtitle("Average Weekly Consumption vs Temperature (2011 - 2014)",
+          subtitle = "Consumption x3 for visualisation purposes")
+  
+
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```
+
+```{r}
+df_joined_weekly <- left_join(df_consumption_weekly, df_weather_weekly, by = "week")
+head(df_joined_weekly)
+```
+
+```{r}
+ggplot(data=df_joined_weekly, aes(x=tavg, y=kwh_per_hh_avg)) +
+  geom_area( fill="#760000", alpha=0.6) +
+  geom_line(color="#760000", size=0.9) +
+  xlab("Temperature (C)") + ylab("Weekly monthly consumption (kw/hh)") +
+  theme_light()+
+  ggtitle("T vs Consump (weekly)")
+```
+
+```{r}
+ggsave('daily_consumption.png', plot = last_plot(), dpi = 600, width = 8, height = 5)
+```

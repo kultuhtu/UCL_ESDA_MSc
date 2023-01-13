@@ -1,0 +1,440 @@
+---
+title: "Classification"
+output: github_document
+---
+
+Import Libraries
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+
+set.seed(100) # For reproducibility
+```
+
+Load datasets
+
+```{r}
+df_consumption_daily_2011_2012 <- read_csv(
+  "../data/household_consumption_2011_2012_daily.csv", show_col_types = FALSE)
+df_consumption_daily_2013 <- read_csv(
+  "../data/household_consumption_2013_daily.csv", show_col_types = FALSE)
+df_consumption_daily_2014 <- read_csv(
+  "../data/household_consumption_2014_daily.csv", show_col_types = FALSE)
+df_households <- read_csv("../data/household_information.csv", 
+                          show_col_types = FALSE)
+df_weather_daily <- read_csv("../data/weather_daily.csv", 
+                             show_col_types = FALSE)
+```
+
+Daily consumption data
+
+```{r}
+df_consumption_daily <- rbind(df_consumption_daily_2011_2012, 
+                              df_consumption_daily_2013, 
+                              df_consumption_daily_2014)
+# Select only household ID, date, and average daily consumption
+df_consumption_daily <- df_consumption_daily %>% 
+  select(LCLid, date, kwh_per_hh_avg)
+head(df_consumption_daily)
+```
+
+Household information
+
+```{r}
+head(df_households)
+```
+
+Weather dataset
+
+```{r}
+# Only select date and tavg
+df_weather_daily <- df_weather_daily %>% select(date, tavg)
+head(df_weather_daily)
+```
+
+Clean household information dataset
+
+```{r}
+df_households <- df_households %>% select(-Acorn, -file)
+df_households <- df_households[df_households$Acorn_grouped %in% c("Affluent", 
+                                                                  "Comfortable",
+                                                                  "Adversity"),]
+df_households[df_households$stdorToU == "ToU", ]$stdorToU <- "1"
+df_households[df_households$stdorToU == "Std", ]$stdorToU <- "0"
+df_households$stdorToU = as.integer(df_households$stdorToU)
+colnames(df_households)[2] <- "is_ToU"
+```
+
+Join the consumption dataset with weather dataset
+
+```{r}
+df_joined_daily <- left_join(df_consumption_daily, df_weather_daily, 
+                             by = "date")
+head(df_joined_daily)
+```
+
+Data preprocessing
+
+```{r}
+df_joined_daily$week <- week(df_joined_daily$date)
+df_joined_daily$kwh_per_temperature_avg = 
+  df_joined_daily$kwh_per_hh_avg / df_joined_daily$tavg
+head(df_joined_daily)
+```
+
+Without temperature
+
+```{r}
+df_joined_without_temperature <- df_joined_daily %>% select(LCLid, week, 
+                                                            kwh_per_hh_avg)
+df_joined_without_temperature <- df_joined_without_temperature %>% 
+  group_by(LCLid, week) %>% summarise(kwh_per_hh_avg = mean(kwh_per_hh_avg, 
+                                                            na.rm = TRUE)) %>% 
+  ungroup()
+df_joined_without_temperature <- pivot_wider(
+  df_joined_without_temperature, names_from = week, 
+  names_glue = "week_{week}_avg_exclude_temperature", 
+  values_from = kwh_per_hh_avg)
+# Remove NAs
+df_joined_without_temperature <- df_joined_without_temperature %>% drop_na()
+```
+
+With temperature
+
+```{r}
+df_joined_with_temperature <- df_joined_daily %>% 
+  select(LCLid, week, kwh_per_temperature_avg)
+df_joined_with_temperature <- df_joined_with_temperature %>% 
+  group_by(LCLid, week) %>% 
+  summarise(kwh_per_temperature_avg = mean(kwh_per_temperature_avg, 
+                                           na.rm = TRUE)) %>% ungroup()
+df_joined_with_temperature <- pivot_wider(
+  df_joined_with_temperature, names_from = week, 
+  names_glue = "week_{week}_avg_include_temperature", 
+  values_from = kwh_per_temperature_avg)
+# Remove NAs
+df_joined_with_temperature <- df_joined_with_temperature %>% drop_na()
+```
+
+Label
+
+```{r}
+label_ref <- data.frame(levels = c("Adversity", "Comfortable", "Affluent"), 
+                        label = c(0, 1, 2))
+```
+
+Joined datasets
+
+```{r}
+df_joined <- left_join(df_joined_with_temperature, 
+                        df_joined_without_temperature, by = "LCLid")
+df_joined <- inner_join(df_joined, df_households, by = "LCLid")
+df_joined <- left_join(df_joined, label_ref, by = c("Acorn_grouped" = "levels"))
+head(df_joined)
+```
+
+Create train and test datasets
+
+```{r}
+df_joined <- df_joined %>% 
+  mutate(n = row_number()) %>% 
+  select(n, everything()) 
+df_train <- df_joined %>% 
+  group_by(Acorn_grouped) %>% 
+  sample_frac(.75) %>% 
+  ungroup()
+df_test <- anti_join(df_joined, df_train, by = "LCLid") 
+df_train <- df_train %>% select(-n)
+df_test <- df_test %>% select(-n)
+```
+
+Separate df_train and df_test
+
+```{r}
+# Without temperature
+# Train
+df_train_without_temperature <- df_train %>% 
+  select(contains(c("exclude", "Acorn")))
+df_train_without_temperature$Acorn_grouped <- factor(
+  df_train_without_temperature$Acorn_grouped, levels = c("Adversity", 
+                                                         "Comfortable", 
+                                                         "Affluent")
+)
+
+# Test
+df_test_without_temperature <- df_test %>% 
+  select(contains(c("exclude", "Acorn")))
+df_test_without_temperature$Acorn_grouped <- factor(
+  df_test_without_temperature$Acorn_grouped, levels = c("Adversity", 
+                                                         "Comfortable", 
+                                                         "Affluent")
+)
+
+# With temperature
+# Train
+df_train_with_temperature <- df_train %>% 
+  select(contains(c("include", "Acorn")))
+df_train_with_temperature$Acorn_grouped <- factor(
+  df_train_with_temperature$Acorn_grouped, levels = c("Adversity", 
+                                                     "Comfortable", 
+                                                     "Affluent")
+)
+
+# Test
+df_test_with_temperature <- df_test %>% 
+  select(contains(c("include", "Acorn")))
+df_test_with_temperature$Acorn_grouped <- factor(
+  df_test_with_temperature$Acorn_grouped, levels = c("Adversity", 
+                                                     "Comfortable", 
+                                                     "Affluent")
+)
+```
+
+Separate X and y
+
+```{r}
+# Without temperature
+X_train_without_temperature <- df_train %>% 
+  select(contains(c("exclude")))
+X_test_without_temperature <- df_test %>% 
+  select(contains(c("exclude")))
+
+# With temperature
+X_train_with_temperature <- df_train %>% select(contains(c("include")))
+X_test_with_temperature <- df_test %>% select(contains(c("include")))
+
+y_train <- df_train %>% select(label)
+y_test <- df_test %>% select(label)
+```
+
+Logistic regression
+
+```{r}
+# Without temperature - Train
+logistic_without_temperature <- multinom(Acorn_grouped ~ ., 
+                                         data = df_train_without_temperature)
+logistic_without_temperature_pred_train <- logistic_without_temperature %>% 
+  predict(df_train_without_temperature)
+mean(logistic_without_temperature_pred_train == 
+       df_train_without_temperature$Acorn_grouped)
+```
+
+```{r}
+# Without temperature - Test
+logistic_without_temperature_pred_test <- logistic_without_temperature %>% 
+  predict(df_test_without_temperature)
+mean(logistic_without_temperature_pred_test == 
+       df_test_without_temperature$Acorn_grouped)
+```
+
+```{r}
+# With temperature - Train
+logistic_with_temperature <- multinom(Acorn_grouped ~ ., 
+                                      data = df_train_with_temperature)
+logistic_with_temperature_pred_train <- logistic_with_temperature %>% 
+  predict(df_train_with_temperature)
+mean(logistic_with_temperature_pred_train == 
+       df_train_with_temperature$Acorn_grouped)
+```
+
+```{r}
+# With temperature - Test
+logistic_with_temperature_pred_test <- logistic_with_temperature %>% 
+  predict(df_test_with_temperature)
+mean(logistic_with_temperature_pred_test == 
+       df_test_with_temperature$Acorn_grouped)
+```
+
+Decision Tree
+
+```{r}
+# Without temperature - Train
+dtree_without_temperature <- ctree(Acorn_grouped ~ ., 
+                                  data = df_train_without_temperature)
+dtree_without_temperature_pred_train <- dtree_without_temperature %>% 
+  predict(df_train_without_temperature)
+mean(dtree_without_temperature_pred_train == 
+       df_train_without_temperature$Acorn_grouped)
+```
+
+```{r}
+# Without temperature - Test
+dtree_without_temperature_pred_test <- dtree_without_temperature %>% 
+  predict(df_test_without_temperature)
+mean(dtree_without_temperature_pred_test == 
+       df_test_without_temperature$Acorn_grouped)
+```
+
+```{r}
+# With temperature - Train
+dtree_with_temperature <- ctree(Acorn_grouped ~ ., 
+                                data = df_train_with_temperature)
+dtree_with_temperature_pred_train <- dtree_with_temperature %>% 
+  predict(df_train_with_temperature)
+mean(dtree_with_temperature_pred_train == 
+       df_train_with_temperature$Acorn_grouped)
+```
+
+```{r}
+# With temperature - Test
+dtree_with_temperature <- ctree(Acorn_grouped ~ ., 
+                                data = df_train_with_temperature)
+dtree_with_temperature_pred_test <- dtree_with_temperature %>% 
+  predict(df_test_with_temperature)
+mean(dtree_with_temperature_pred_test == 
+       df_test_with_temperature$Acorn_grouped)
+```
+
+Random Forest
+
+```{r}
+# Without temperature - Train
+rf_without_temperature <- randomForest(Acorn_grouped ~ ., 
+                                       data = df_train_without_temperature)
+rf_without_temperature_pred_train <- rf_without_temperature %>% 
+  predict(df_train_without_temperature)
+mean(rf_without_temperature_pred_train == 
+       df_train_without_temperature$Acorn_grouped)
+```
+
+```{r}
+# Without temperature - Test
+rf_without_temperature_pred_test <- rf_without_temperature %>% 
+  predict(df_test_without_temperature)
+mean(rf_without_temperature_pred_test == 
+       df_test_without_temperature$Acorn_grouped)
+```
+
+```{r}
+# With temperature - Train
+rf_with_temperature <- randomForest(Acorn_grouped ~ ., 
+                                     data = df_train_with_temperature)
+rf_with_temperature_pred_train <- rf_with_temperature %>% 
+  predict(df_train_with_temperature)
+mean(rf_with_temperature_pred_train == 
+       df_train_with_temperature$Acorn_grouped)
+```
+
+```{r}
+# With temperature - Test
+rf_with_temperature_pred_test <- rf_with_temperature %>% 
+  predict(df_test_with_temperature)
+mean(rf_with_temperature_pred_test == 
+       df_test_with_temperature$Acorn_grouped)
+```
+
+XGBoost Reformat dataset to match with XGBoost format
+
+```{r}
+# Without temperature
+train_matrix_without_temperature <- xgb.DMatrix(data = 
+  as.matrix(X_train_without_temperature), label = y_train$label)
+test_matrix_without_temperature <- xgb.DMatrix(data = 
+  as.matrix(X_test_without_temperature), label = y_test$label)
+
+# With temperature
+train_matrix_with_temperature <- xgb.DMatrix(data = 
+  as.matrix(X_train_with_temperature), label = y_train$label)
+test_matrix_with_temperature <- xgb.DMatrix(data = 
+  as.matrix(X_test_with_temperature), label = y_test$label)
+```
+
+Train the XGBoost model
+
+```{r}
+numberOfClasses <- 3
+xgb_params <- list("objective" = "multi:softprob",
+                   "eval_metric" = "mlogloss",
+                   "num_class" = numberOfClasses)
+
+# Without temperature
+xgb_model_without_temperature <- xgb.train(
+  params = xgb_params, data = train_matrix_without_temperature, nrounds = 250)
+
+# With temperature
+xgb_model_with_temperature <- xgb.train(
+  params = xgb_params, data = train_matrix_with_temperature, nrounds = 250)
+```
+
+Train performance
+
+```{r}
+# Without temperature
+xgb_train_pred_without_temperature <- predict(
+  xgb_model_without_temperature, newdata = train_matrix_without_temperature)
+
+xgb_train_prediction_without_temperature <- matrix(
+  xgb_train_pred_without_temperature, nrow = numberOfClasses, 
+  ncol= length(xgb_train_pred_without_temperature) / numberOfClasses) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(label = y_train$label,
+         max_prob = max.col(., "last") - 1)
+
+confusionMatrix(factor(xgb_train_prediction_without_temperature$max_prob),
+                factor(xgb_train_prediction_without_temperature$label),
+                mode = "everything")
+```
+
+```{r}
+# With temperature
+xgb_train_pred_with_temperature <- predict(
+  xgb_model_with_temperature, newdata = train_matrix_with_temperature)
+
+xgb_train_prediction_with_temperature <- matrix(
+  xgb_train_pred_with_temperature, nrow = numberOfClasses, 
+  ncol= length(xgb_train_pred_with_temperature) / numberOfClasses) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(label = y_train$label,
+         max_prob = max.col(., "last") - 1)
+
+confusionMatrix(factor(xgb_train_prediction_with_temperature$max_prob),
+                factor(xgb_train_prediction_with_temperature$label),
+                mode = "everything")
+```
+
+Test performance
+
+```{r}
+# Without temperature
+xgb_test_pred_without_temperature <- predict(
+  xgb_model_without_temperature, newdata = test_matrix_without_temperature)
+
+xgb_test_prediction_without_temperature <- matrix(
+  xgb_test_pred_without_temperature, nrow = numberOfClasses, 
+  ncol=length(xgb_test_pred_without_temperature)/numberOfClasses) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(label = y_test$label,
+    max_prob = max.col(., "last") - 1)
+
+confusionMatrix(factor(xgb_test_prediction_without_temperature$max_prob),
+                factor(xgb_test_prediction_without_temperature$label),
+                mode = "everything")
+```
+
+```{r}
+# With temperature
+xgb_test_pred_with_temperature <- predict(
+  xgb_model_with_temperature, newdata = test_matrix_with_temperature)
+
+xgb_test_prediction_with_temperature <- matrix(
+  xgb_test_pred_with_temperature, nrow = numberOfClasses, 
+  ncol=length(xgb_test_pred_with_temperature)/numberOfClasses) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(label = y_test$label,
+    max_prob = max.col(., "last") - 1)
+
+confusionMatrix(factor(xgb_test_prediction_with_temperature$max_prob),
+                factor(xgb_test_prediction_with_temperature$label),
+                mode = "everything")
+```
