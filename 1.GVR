@@ -1,0 +1,2 @@
+### Green vehicle routing problem: introduction of electric and limited capacity vehicles to the fleet
+This study aims to evaluate the impact of introducing electric vehicles and limited capacity vehicles to a fleet of conventional trucks. A base scenario of Vehicle Routing Problem (VRP) for one conventional truck is considered and compared to two heterogeneous fleet Green VRP (GVRP) scenarios: one with an additional electric truck (ET) and one with an additional electric van (EV).
