@@ -1,0 +1,488 @@
+---
+title: "classification"
+output: html_document
+date: "2022-08-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+# Internal temperature
+
+### 1. import data
+
+```{r}
+df <- read_csv("../3.classify/outputs/df.csv", show_col_types = FALSE)
+df <- subset(df, select = c("id","date", "state","pred"))
+df
+```
+
+```{r}
+df_62_c <- df[which(df$id == "62"),]
+df_63_c <- df[which(df$id == "63"),]
+df_64_c <- df[which(df$id == "64"),]
+df_66_c <- df[which(df$id == "66"),]
+df_67_c <- df[which(df$id == "67"),]
+df_68_c <- df[which(df$id == "68"),]
+df_70_c <- df[which(df$id == "70"),]
+df_73_c <- df[which(df$id == "73"),]
+
+```
+
+```{r results = 'hold'}
+
+df_62 <- read_csv("../1.clean/outputs/62_main.csv", show_col_types = FALSE)
+df_63 <- read_csv("../1.clean/outputs/63_main.csv", show_col_types = FALSE)
+df_64 <- read_csv("../1.clean/outputs/64_main.csv", show_col_types = FALSE)
+df_66 <- read_csv("../1.clean/outputs/66_main.csv", show_col_types = FALSE)
+df_67 <- read_csv("../1.clean/outputs/67_main.csv", show_col_types = FALSE)
+df_68 <- read_csv("../1.clean/outputs/68_main.csv", show_col_types = FALSE)
+df_70 <- read_csv("../1.clean/outputs/70_main.csv", show_col_types = FALSE)
+df_73 <- read_csv("../1.clean/outputs/73_main.csv", show_col_types = FALSE)
+
+str(df_62)
+head(df_62)
+```
+
+```{r results = 'hold'}
+
+df_62 <- subset(df_62, select = c("date", "tavg","tavg_state"))
+df_63 <- subset(df_63, select = c("date", "tavg","tavg_state"))
+df_64 <- subset(df_64, select = c("date", "tavg","tavg_state"))
+df_66 <- subset(df_66, select = c("date", "tavg","tavg_state"))
+df_67 <- subset(df_67, select = c("date", "tavg","tavg_state"))
+df_68 <- subset(df_68, select = c("date", "tavg","tavg_state"))
+df_70 <- subset(df_70, select = c("date", "tavg","tavg_state"))
+df_73 <- subset(df_73, select = c("date", "tavg","tavg_state"))
+
+str(df_62)
+head(df_62)
+```
+
+### 2. find temperature drop in 3h after last heating
+
+```{r}
+## 62
+df_62_lh <- df_62 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 63
+df_63_lh <- df_63 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 64
+df_64_lh <- df_64 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 66
+df_66_lh <- df_66 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 67
+df_67_lh <- df_67 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 68
+df_68_lh <- df_68 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 70
+df_70_lh <- df_70 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+## 73
+df_73_lh <- df_73 %>%
+  group_by(grp = cumsum(tavg_state == 1)) %>%
+  filter(first(tavg_state) == 1, date <= (first(date) + 3600*3)) %>%
+  summarize(
+    date_1 = first(date), date_n = last(date),
+    value_1 = first(tavg), value_n = last(tavg),
+    #value_max = max(tavg), value_min = min(tavg),
+    dip = (value_1 - value_n)/10
+  ) %>%
+  group_by(date = substring(date_1, 1, 10)) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+
+str(df_62_lh)
+head(df_62_lh)
+head(df_63_lh)
+head(df_64_lh)
+head(df_66_lh)
+head(df_67_lh)
+head(df_68_lh)
+head(df_70_lh)
+head(df_73_lh)
+```
+
+```{r}
+df_62_f <- subset(df_62_lh, select = c("date", "dip", "value_1"))
+df_63_f <- subset(df_63_lh, select = c("date", "dip", "value_1"))
+df_64_f <- subset(df_64_lh, select = c("date", "dip", "value_1"))
+df_66_f <- subset(df_66_lh, select = c("date", "dip", "value_1"))
+df_67_f <- subset(df_67_lh, select = c("date", "dip", "value_1"))
+df_68_f <- subset(df_68_lh, select = c("date", "dip", "value_1"))
+df_70_f <- subset(df_70_lh, select = c("date", "dip", "value_1"))
+df_73_f <- subset(df_73_lh, select = c("date", "dip", "value_1"))
+
+str(df_62_f)
+head(df_62_f)
+```
+
+### 3. add external temperatures
+
+```{r}
+df_ext <- read_csv("../0.data/forecast.csv", show_col_types = FALSE)
+df_ext$t <- (df_ext$maxtemp+df_ext$mintemp)/2
+df_ext$date <- df_ext$dateforecastfor
+df_ext <- subset(df_ext, select = c("date", "t"))
+df_ext <- df_ext %>%
+  mutate(date = as.POSIXct(paste(date), format='%d/%m/%Y'))
+df_ext
+```
+
+```{r}
+# aggragate temp to daily
+df_ext <- df_ext %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d')) %>%
+  group_by(date = cut(date, breaks="1 days")) %>%
+  summarize(t = mean(t))
+
+df_ext <- df_ext %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+
+head(df_ext)
+```
+
+```{r}
+## Join datasets
+df_62_f <- df_62_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_63_f <- df_63_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_64_f <- df_64_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_66_f <- df_66_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_67_f <- df_67_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_68_f <- df_68_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_70_f <- df_70_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+df_73_f <- df_73_f %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+
+
+df_62_j <- left_join(df_62_f, df_ext, by=c("date"))
+df_63_j <- left_join(df_63_f, df_ext, by=c("date"))
+df_64_j <- left_join(df_64_f, df_ext, by=c("date"))
+df_66_j <- left_join(df_66_f, df_ext, by=c("date"))
+df_67_j <- left_join(df_67_f, df_ext, by=c("date"))
+df_68_j <- left_join(df_68_f, df_ext, by=c("date"))
+df_70_j <- left_join(df_70_f, df_ext, by=c("date"))
+df_73_j <- left_join(df_73_f, df_ext, by=c("date"))
+
+head(df_62_j)
+head(df_63_j)
+head(df_64_j)
+head(df_66_j)
+head(df_67_j)
+head(df_68_j)
+head(df_70_j)
+head(df_73_j)
+```
+
+### 4. find internal-external
+
+```{r}
+df_62_j$dT <- (df_62_j$value_1/10)-df_62_j$t
+df_63_j$dT <- (df_63_j$value_1/10)-df_63_j$t
+df_64_j$dT <- (df_64_j$value_1/10)-df_64_j$t
+df_66_j$dT <- (df_66_j$value_1/10)-df_66_j$t
+df_67_j$dT <- (df_67_j$value_1/10)-df_67_j$t
+df_68_j$dT <- (df_68_j$value_1/10)-df_68_j$t
+df_70_j$dT <- (df_70_j$value_1/10)-df_70_j$t
+df_73_j$dT <- (df_73_j$value_1/10)-df_73_j$t
+
+df_62_flex <- subset(df_62_j, select = c("date", "dip", "dT"))
+df_63_flex <- subset(df_63_j, select = c("date", "dip", "dT"))
+df_64_flex <- subset(df_64_j, select = c("date", "dip", "dT"))
+df_66_flex <- subset(df_66_j, select = c("date", "dip", "dT"))
+df_67_flex <- subset(df_67_j, select = c("date", "dip", "dT"))
+df_68_flex <- subset(df_68_j, select = c("date", "dip", "dT"))
+df_70_flex <- subset(df_70_j, select = c("date", "dip", "dT"))
+df_73_flex <- subset(df_73_j, select = c("date", "dip", "dT"))
+
+head(df_62_flex)
+head(df_63_flex)
+head(df_64_flex)
+head(df_66_flex)
+head(df_67_flex)
+head(df_68_flex)
+head(df_70_flex)
+head(df_73_flex)
+```
+
+```{r}
+df_62_flex<-df_62_flex[(df_62_flex$dip>0),]
+df_63_flex<-df_63_flex[(df_63_flex$dip>0),]
+df_64_flex<-df_64_flex[(df_64_flex$dip>0),]
+df_66_flex<-df_66_flex[(df_66_flex$dip>0),]
+df_67_flex<-df_67_flex[(df_67_flex$dip>0),]
+df_68_flex<-df_68_flex[(df_68_flex$dip>0),]
+df_70_flex<-df_70_flex[(df_70_flex$dip>0),]
+df_73_flex<-df_73_flex[(df_73_flex$dip>0),]
+head(df_62_flex)
+head(df_63_flex)
+head(df_64_flex)
+head(df_66_flex)
+head(df_67_flex)
+head(df_68_flex)
+head(df_70_flex)
+head(df_73_flex)
+```
+
+### 5. filter out weekends and summer
+
+```{r}
+df_62_flex <- df_62_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_62_flex <- df_62_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_63_flex <- df_63_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_63_flex <- df_63_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_64_flex <- df_64_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_64_flex <- df_64_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_66_flex <- df_66_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_66_flex <- df_66_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_67_flex <- df_67_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_67_flex <- df_67_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_68_flex <- df_68_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_68_flex <- df_68_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_70_flex <- df_70_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_70_flex <- df_70_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_73_flex <- df_73_flex %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_73_flex <- df_73_flex %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+head(df_62_flex)
+head(df_63_flex)
+head(df_64_flex)
+head(df_66_flex)
+head(df_67_flex)
+head(df_68_flex)
+head(df_70_flex)
+head(df_73_flex)
+```
+
+```{r}
+a_62 <- data.frame(dT=15)
+lm_62 <- lm(dip ~ dT, data = df_62_flex)
+a_62$dip <- lm_62 %>% predict(a_62)
+
+a_63 <- data.frame(dT=15)
+lm_63 <- lm(dip ~ dT, data = df_63_flex)
+a_63$dip <- lm_63 %>% predict(a_63)
+
+a_64 <- data.frame(dT=15)
+lm_64 <- lm(dip ~ dT, data = df_64_flex)
+a_64$dip <- lm_64 %>% predict(a_64)
+
+a_66 <- data.frame(dT=15)
+lm_66 <- lm(dip ~ dT, data = df_66_flex)
+a_66$dip <- lm_66 %>% predict(a_66)
+
+a_67 <- data.frame(dT=15)
+lm_67 <- lm(dip ~ dT, data = df_67_flex)
+a_67$dip <- lm_67 %>% predict(a_67)
+
+a_68 <- data.frame(dT=15)
+lm_68 <- lm(dip ~ dT, data = df_68_flex)
+a_68$dip <- lm_68 %>% predict(a_68)
+
+a_70 <- data.frame(dT=15)
+lm_70 <- lm(dip ~ dT, data = df_70_flex)
+a_70$dip <- lm_70 %>% predict(a_70)
+
+a_73 <- data.frame(dT=15)
+lm_73 <- lm(dip ~ dT, data = df_73_flex)
+a_73$dip <- lm_73 %>% predict(a_73)
+```
+
+```{r}
+ggplot() +
+  geom_point(data=df_62_flex, aes(x=dT, y=dip), 
+             alpha=0.3,  color="black") + labs(title="62") + #xlim(10,25) + 
+  geom_smooth(data=df_62_flex, aes(x=dT, y=dip), method=lm, se=TRUE) +
+  geom_segment(data=a_62, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_62, aes(x=dT, y=dip),xend=0, yend=a_62$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot() +
+  geom_point(data=df_63_flex, aes(x=dT, y=dip),
+             alpha=0.3,  color="black") + labs(title="63") + #xlim(10,25) + 
+  geom_smooth(data=df_63_flex, aes(x=dT, y=dip), method=lm, se=TRUE)+
+  geom_segment(data=a_63, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_63, aes(x=dT, y=dip),xend=0, yend=a_63$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot(df_64_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="64") + #xlim(10,25) + 
+  geom_smooth(method=lm, se=TRUE)+
+  geom_segment(data=a_64, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_64, aes(x=dT, y=dip),xend=0, yend=a_64$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot(df_66_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="66") + #xlim(10,25) + 
+  geom_smooth(method=lm, se=TRUE)+
+  geom_segment(data=a_66, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_66, aes(x=dT, y=dip),xend=0, yend=a_66$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot(df_67_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="67") + #xlim(10,25) 
+  geom_smooth(method=lm, se=TRUE) +
+  geom_segment(data=a_67, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_67, aes(x=dT, y=dip),xend=0, yend=a_67$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot(df_68_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="68") + #xlim(10,25) + 
+  geom_smooth(method=lm, se=TRUE)+
+  geom_segment(data=a_68, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_68, aes(x=dT, y=dip),xend=0, yend=a_68$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot(df_70_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="70") + #xlim(10,25) + 
+  geom_smooth(method=lm, se=TRUE) +
+  geom_segment(data=a_70, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_70, aes(x=dT, y=dip),xend=0, yend=a_70$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+
+ggplot(df_73_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="73") + #xlim(10,25) + 
+  geom_smooth(method=lm, se=TRUE) +
+  geom_segment(data=a_73, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_73, aes(x=dT, y=dip),xend=0, yend=a_73$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+```
+
+```{r}
+ggplot(df_66_flex, aes(x=dT, y=dip)) +
+  geom_point(alpha=0.3,  color="black") + labs(title="66") + #xlim(10,25) + 
+  geom_smooth(method=lm, se=TRUE)+
+  geom_segment(data=a_66, aes(x=dT, y=dip),xend=15, yend=0,color='red',size=1.2)+
+  geom_segment(data=a_66, aes(x=dT, y=dip),xend=0, yend=a_66$dip,color='red',size=1.2) + 
+  xlim(5,30) 
+```
+
+```{r}
+ggsave('flex1.png', plot = last_plot(), dpi = 800, width = 6, height = 4)
+```
