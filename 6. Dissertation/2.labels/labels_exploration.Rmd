@@ -1,0 +1,277 @@
+---
+title: "labels_exploration"
+output: html_document
+date: "2022-08-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+# Import
+
+```{r results = 'hold'}
+
+df_62 <- read_csv("../1.clean/outputs/62_main.csv", show_col_types = FALSE)
+df_63 <- read_csv("../1.clean/outputs/63_main.csv", show_col_types = FALSE)
+df_64 <- read_csv("../1.clean/outputs/64_main.csv", show_col_types = FALSE)
+df_66 <- read_csv("../1.clean/outputs/66_main.csv", show_col_types = FALSE)
+df_67 <- read_csv("../1.clean/outputs/67_main.csv", show_col_types = FALSE)
+df_68 <- read_csv("../1.clean/outputs/68_main.csv", show_col_types = FALSE)
+df_70 <- read_csv("../1.clean/outputs/70_main.csv", show_col_types = FALSE)
+df_73 <- read_csv("../1.clean/outputs/73_main.csv", show_col_types = FALSE)
+
+head(df_62)
+head(df_63)
+head(df_64)
+head(df_66)
+head(df_67)
+head(df_68)
+head(df_70)
+head(df_73)
+str(df_62)
+```
+
+```{r}
+df_62_plot <- as_tbl_time(df_62, date)
+df_62_plot <- df_62_plot %>%
+  filter_time('2017-01-21 17:00' ~ '2017-01-21 22:00')
+
+df_63_plot <- as_tbl_time(df_63, date)
+df_63_plot <- df_63_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_64_plot <- as_tbl_time(df_64, date)
+df_64_plot <- df_64_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_66_plot <- as_tbl_time(df_66, date)
+df_66_plot <- df_66_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_67_plot <- as_tbl_time(df_67, date)
+df_67_plot <- df_67_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_68_plot <- as_tbl_time(df_68, date)
+df_68_plot <- df_68_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_70_plot <- as_tbl_time(df_70, date)
+df_70_plot <- df_70_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_73_plot <- as_tbl_time(df_73, date)
+df_73_plot <- df_73_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+```
+
+# First plot
+
+```{r}
+ggplot() +
+  geom_line(data=df_62_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_63_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_64_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="blue") +
+  geom_line(data=df_66_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="green") +
+  geom_line(data=df_67_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="orange") +
+  geom_line(data=df_68_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="purple") +
+  geom_line(data=df_70_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="pink") +
+  geom_line(data=df_73_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="yellow") +
+  
+  xlab("") + ylab("") +
+  ylim(0,800) +
+  theme_light()+
+  ggtitle("")
+```
+
+```{r results = 'hold'}
+
+colors <- c("Gas Pulse" = "ivory4", 
+            "Heating Flow Temperature" = "lightpink1", 
+            "L1" = "mediumorchid4", 
+            "L2" = "midnightblue", 
+            "L3" = "lightsalmon4")
+
+p0 <- ggplot(df_62_plot) +
+  geom_line(aes(x=date, y=kwh/100, color="Gas Pulse"), alpha=0.4, size=1.5) +
+  geom_line(aes(x=date, y=th/10, color="Heating Flow Temperature"), alpha=0.4, size=1.5) +
+  scale_y_continuous(name = "Temperature (°C)", sec.axis = sec_axis(trans=~./10, name="Gas Pulse (kWh)"))
+
+
+p1 <- p0 + geom_line(aes(x=date, y=tlr_state*70, color="L1"), alpha=1, size=1) +
+  #geom_line(aes(x=date, y=(tlr-200), color="L2"), alpha=1, size=0.3) +
+  xlab("") + scale_x_datetime(date_breaks = "30 min", date_labels = "%I:%M %p") +
+  labs(title = "19 Feb 2017", subtitle = "M1", color = "") + 
+  scale_color_manual(values = colors) + theme_tufte() +
+  theme(axis.title.y = element_blank(), 
+        axis.title.y.right = element_blank(), 
+        legend.position="none")
+
+
+p2 <- p0 + geom_line(aes(x=date, y=tavg_state*70, color="L2"), alpha=1, size=1) +
+  #geom_line(aes(x=date, y=(tavg-200), color="L2"), alpha=1, size=0.3) +
+  xlab("") + scale_x_datetime(date_breaks = "5 hours", date_labels = "%I:%M %p") +
+  labs(subtitle = "M2", color = "Legend") + 
+  scale_color_manual(values = colors) + theme_tufte() +
+  theme(axis.title.y = element_text(size=13, vjust=+4), 
+        axis.title.y.right = element_text(size=13, vjust=+4),
+        legend.position="none")
+
+
+p3 <- p0 + geom_line(aes(x=date, y=th_state*70, color="L3"), alpha=1, size=1) + 
+  xlab("") + scale_x_datetime(date_breaks = "5 hours", date_labels = "%I:%M %p") +
+  labs(subtitle = "M3", color = "") + 
+  scale_color_manual(values = colors) + theme_tufte() +
+  theme(axis.title.y = element_blank(), axis.title.y.right = element_blank(),
+        legend.position="bottom", legend.direction="horizontal")
+```
+
+```{r}
+library(patchwork)
+p1 + p2 + p3 + plot_layout(ncol = 1) & theme(panel.grid.major = element_line(size = 0.2, color = "grey92"))
+```
+
+```{r}
+library("lubridate")
+
+colors2 <- c("Gas Pulse" = "ivory4", 
+            "Heating Flow Temperature" = "lightpink1",
+            "L3" = "lightsalmon4")
+            #"Living Room Temperature" = "purple",
+            #"Average Indoors Temperature" = "blue")
+
+#shade = data.frame(x1="2017-01-21 18:00:00", x2="2017-01-21 18:30:00", y1=0, y2=50)
+
+
+p44 <- ggplot() +
+  geom_line(data = df_62_plot, aes(x=date, y=kwh/100, color="Gas Pulse"), alpha=0.8, size=1) +
+  geom_line(data = df_62_plot, aes(x=date, y=th/10, color="Heating Flow Temperature"), alpha=0.8, size=1) +
+  geom_line(data = df_62_plot, aes(x=date, y=th_state*70, color="L3"), alpha=1, size=1) +
+  #geom_line(aes(x=date, y=(tlr/10), color="Living Room Temperature"), alpha=0.8, size=0.5) +
+  #geom_line(aes(x=date, y=(tavg/10), color="Average Indoors Temperature"), alpha=0.8, size=0.5) +
+  scale_y_continuous(name = "Temperature (°C)", sec.axis = sec_axis(trans=~./10, name="Gas Pulse (kWh)")) +
+  scale_color_manual(values = colors2) + theme_tufte() + xlab("") +
+  labs(title = "19 Feb 2017", color = "") + scale_x_datetime(date_breaks = "30 min", date_labels = "%I:%M %p") +
+  theme(legend.position="bottom", legend.direction="horizontal",
+        panel.grid.major = element_line(size = 0.2, color = "grey92"))
+```
+
+```{r}
+library(ggtext)
+
+p44 + annotate(xmin=as.POSIXct("2017-01-21 18:00:00"), xmax=as.POSIXct("2017-01-21 18:30:00"), 
+           ymin=0, ymax=Inf, geom='rect', alpha=0.2, fill="red") + 
+  annotate(xmin=as.POSIXct("2017-01-21 18:00:00"), xmax=as.POSIXct("2017-01-21 18:30:00"), 
+           ymin=35, ymax=35.1, geom='rect', alpha=0, color = "black") + 
+  
+  annotate(xmin=as.POSIXct("2017-01-21 18:00:00"), xmax=as.POSIXct("2017-01-21 18:00:00"), 
+           ymin=34, ymax=36, geom='rect', alpha=0, color = "black") +
+    annotate(xmin=as.POSIXct("2017-01-21 18:30:00"), xmax=as.POSIXct("2017-01-21 18:30:00"), 
+           ymin=34, ymax=36, geom='rect', alpha=0, color = "black") +
+  
+  #annotate("text", x=as.POSIXct("2017-01-21 18:05:00"), y = 35, label='bold("Heating delay")', size = 4, angle =90)
+  geom_richtext(aes(x =as.POSIXct("2017-01-21 18:15:00"), y = 40, 
+                    label = "**Heating Delay**"), fill = NA, label.color = NA, size = 2.8)
+
+  
+  
+  
+  
+  #geom_vline(aes(xintercept = as.POSIXct("2017-01-21 18:00:00")), colour = "red", alpha = 0.8) +
+  #geom_vline(aes(xintercept = as.POSIXct("2017-01-21 18:30:00")), colour = "red", alpha = 0.8)
+
+```
+
+```{r}
+ggsave('lables2.png', plot = last_plot(), dpi = 800, width = 8, height = 6)
+```
+
+```{r results = 'hold'}
+ggplot(df_62_plot) +
+  geom_line(aes(x=date, y=tavg/10, color="Gas Pulse"), alpha=0.4, size=1.5)+
+  geom_point(aes(x=date, y=tavg_state*20, color="L3"), alpha=1, size=3)+
+  ylim(18,22)
+
+ggplot(df_62_plot) +
+  geom_line(aes(x=date, y=tlr/10, color="Gas Pulse"), alpha=0.4, size=1.5)+
+  geom_point(aes(x=date, y=tlr_state*20, color="L3"), alpha=1, size=3)+
+  ylim(18,22)
+```
+
+# Filter
+
+```{r}
+df_73
+```
+
+```{r}
+df_73_f1 <- df_73 %>% filter(!(weekdays(as.Date(date)) %in% c('Saturday','Sunday')))
+df_73_f1
+```
+
+```{r}
+df_73_f2 <- df_73_f1 %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+df_73_f2
+```
+
+# Metrics
+
+```{r}
+df_73_f2$th_state <- as.factor(df_73_f2$th_state)
+df_73_f2$tavg_state <- as.factor(df_73_f2$tavg_state)
+df_73_f2$tlr_state <- as.factor(df_73_f2$tlr_state)
+
+actual <- df_73_f2$th_state
+pred <- df_73_f2$tavg_state
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+h <- hist(df_62$th_state, breaks=2)
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, 1.5))
+```
+
+```{r}
+y <- df_62$th_state
+predictions <- df_62$tavg_state
+
+precision <- posPredValue(predictions, y, positive="1")
+recall <- sensitivity(predictions, y, positive="1")
+
+F1 <- (2 * precision * recall) / (precision + recall)
+```
+
+```{r}
+str(df_62)
+```
