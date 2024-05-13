@@ -1,0 +1,523 @@
+---
+title: "Decision tree"
+output: html_document
+date: "2022-08-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+library(knitr)
+library(ggplot2)
+library(mice)
+library(lattice)
+library(reshape2)
+#install.packages("DataExplorer") if the following package is not available
+library(DataExplorer)
+library(visdat)
+library(ROSE)
+library(e1071)
+library(pROC)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(Metrics)
+library(mlr)
+library(ggplot2)
+library(plotly)
+
+
+set.seed(100) # For reproducibility
+```
+
+# Input
+
+```{r}
+df_train <- read_csv("outputs/df_train3.csv", show_col_types = FALSE)
+df_val <- read_csv("outputs/df_val3.csv", show_col_types = FALSE)
+df_test <- read_csv("outputs/df_test3.csv", show_col_types = FALSE)
+
+df_train = as.data.table(df_train)
+df_train$month = as.factor(df_train$month)
+df_train$weekdays = as.factor(df_train$weekdays)
+df_train$weekend = as.factor(df_train$weekend)
+df_train$quarter = as.factor(df_train$quarter)
+df_train$week = format(df_train$date, "%V")
+df_train = as.data.frame(df_train)
+df_train$week = as.numeric(df_train$week)
+df_train$state = as.factor(df_train$state)
+df_train
+
+
+df_val = as.data.table(df_val)
+df_val$month = as.factor(df_val$month)
+df_val$weekdays = as.factor(df_val$weekdays)
+df_val$weekend = as.factor(df_val$weekend)
+df_val$quarter = as.factor(df_val$quarter)
+df_val$week = format(df_val$date, "%V")
+df_val = as.data.frame(df_val)
+df_val$week = as.numeric(df_val$week)
+df_val$state = as.factor(df_val$state)
+df_val
+
+df_test = as.data.table(df_test)
+df_test$month = as.factor(df_test$month)
+df_test$weekdays = as.factor(df_test$weekdays)
+df_test$weekend = as.factor(df_test$weekend)
+df_test$quarter = as.factor(df_test$quarter)
+df_test$week = format(df_test$date, "%V")
+df_test = as.data.frame(df_test)
+df_test$week = as.numeric(df_test$week)
+df_test$state = as.factor(df_test$state)
+
+
+df_train$mday <- df_train$day 
+df_train$wday <- df_train$weekdays
+df_train$hr <- df_train$Hour
+df_train$qrtr <- df_train$quarter
+df_train$mnth <- df_train$month
+df_train$wend <- df_train$weekend
+df_train$rmean <- df_train$rolling_mean
+df_train$rmed <- df_train$rolling_median
+df_train$rskew <- df_train$rolling_skewness
+df_train$rkurt <- df_train$rolling_kurtosis
+df_train$rstd <- df_train$rolling_std
+df_train$rslope <- df_train$rolling_slope
+df_train$gas <- df_train$kwh
+df_train$l1 <- df_train$lag_1
+df_train$l2 <- df_train$lag_2
+df_train$l3 <- df_train$lag_3
+df_train$l4 <- df_train$lag_4
+df_train$l5 <- df_train$lag_5
+
+df_val$mday <- df_val$day 
+df_val$wday <- df_val$weekdays
+df_val$hr <- df_val$Hour
+df_val$qrtr <- df_val$quarter
+df_val$mnth <- df_val$month
+df_val$wend <- df_val$weekend
+df_val$rmean <- df_val$rolling_mean
+df_val$rmed <- df_val$rolling_median
+df_val$rskew <- df_val$rolling_skewness
+df_val$rkurt <- df_val$rolling_kurtosis
+df_val$rstd <- df_val$rolling_std
+df_val$rslope <- df_val$rolling_slope
+df_val$gas <- df_val$kwh
+df_val$l1 <- df_val$lag_1
+df_val$l2 <- df_val$lag_2
+df_val$l3 <- df_val$lag_3
+df_val$l4 <- df_val$lag_4
+df_val$l5 <- df_val$lag_5
+
+df_test$mday <- df_test$day 
+df_test$wday <- df_test$weekdays
+df_test$hr <- df_test$Hour
+df_test$qrtr <- df_test$quarter
+df_test$mnth <- df_test$month
+df_test$wend <- df_test$weekend
+df_test$rmean <- df_test$rolling_mean
+df_test$rmed <- df_test$rolling_median
+df_test$rskew <- df_test$rolling_skewness
+df_test$rkurt <- df_test$rolling_kurtosis
+df_test$rstd <- df_test$rolling_std
+df_test$rslope <- df_test$rolling_slope
+df_test$gas <- df_test$kwh
+df_test$l1 <- df_test$lag_1
+df_test$l2 <- df_test$lag_2
+df_test$l3 <- df_test$lag_3
+df_test$l4 <- df_test$lag_4
+df_test$l5 <- df_test$lag_5
+```
+
+```{r}
+train <- subset(df_train, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+val <- subset(df_val, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+test <- subset(df_test, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+```
+
+```{r}
+#Separate X and Y (for validation)
+X_train <- train %>% 
+  select(!contains(c("state")))
+X_val <- val %>% 
+  select(!contains(c("state")))
+X_test <- test %>% 
+  select(!contains(c("state")))
+
+y_train <- train %>% select('state')
+y_val <- val %>% select('state')
+y_test <- test %>% select('state')
+
+X_train
+y_train
+
+X_val
+y_val
+
+X_test
+y_test
+```
+
+```{r}
+over <- ovun.sample(state~., data = train, method = "over", N = 102282)$data
+table(over$state)
+```
+
+# Tree0
+
+```{r}
+d.tree = rpart(state ~ ., 
+               data=over, 
+               method = 'class')
+```
+
+As we are not specifying *hyperparameters*, we are using [rpart's](https://www.rdocumentation.org/packages/rpart/versions/4.1.16/topics/rpart) default values:
+
+-   Our tree can descend until 30 levels --- `maxdepth = 30` ;
+
+-   The minimum number of examples in a node to perform a split is 20 --- `minsplit = 20` ;
+
+-   The minimum number of examples in a terminal node is 7 --- `minbucket = 7`;
+
+-   The split must increase the "performance" (although it's not that direct, we can consider "performance" a proxy for `cp`) of the tree by at least 0.01 --- `cp = 0.01` ;
+
+```{r}
+#png(paste0("tree1.png"), width = 125, height = 75, units='mm', res = 700)
+
+rpart.plot(d.tree, cex=0.8)
+```
+
+```{r}
+# Predict Values
+predicted_values <- predict(d.tree, X_val, type = 'class')
+# Getting Accuracy
+accuracy(y_val$state, predicted_values)
+```
+
+```{r}
+d.tree.custom = rpart(state~ ., 
+               data=over, 
+               method = 'class',
+               control = c(maxdepth = 5, cp=0.001))
+```
+
+```{r}
+rpart.plot(d.tree.custom, cex=0.6)
+```
+
+```{r}
+# Predict Values
+predicted_values <- predict(d.tree.custom, X_val, type = 'class')
+# Getting Accuracy
+accuracy(y_val$state, predicted_values)
+```
+
+#### Tune parameters
+
+```{r}
+getParamSet("classif.rpart")
+```
+
+```{r}
+d.tree.params <- makeClassifTask(
+ data=over, 
+ target='state'
+ )
+```
+
+```{r}
+param_grid <- makeParamSet(makeDiscreteParam('maxdepth', values=1:30))
+```
+
+```{r}
+# Define Grid
+control_grid = makeTuneControlGrid()
+# Define Cross Validation
+resample = makeResampleDesc("CV", iters = 3L)
+# Define Measure
+measure = f1
+```
+
+```{r}
+dt_tuneparam <- tuneParams(learner='classif.rpart', 
+ task=d.tree.params, 
+ resampling = resample,
+ measures = measure,
+ par.set=param_grid, 
+ control=control_grid, 
+ show.info = TRUE)
+```
+
+```{r}
+result_hyperparam <- generateHyperParsEffectData(dt_tuneparam, partial.dep = TRUE)
+```
+
+```{r}
+ggplot(
+  data = result_hyperparam$data,
+  aes(x = maxdepth, y=f1.test.mean)
+) + geom_line(color = 'darkblue')
+```
+
+```{r}
+dt_tuneparam 
+```
+
+```{r}
+# Pick Up Best Params and train them
+best_parameters = setHyperPars(
+  makeLearner("classif.rpart", predict.type = "prob"), 
+  par.vals = dt_tuneparam$x)
+
+best_model = train(best_parameters, d.tree.params)
+```
+
+```{r}
+d.tree.mlr.test <- makeClassifTask(
+  data=test, 
+  target="state"
+)
+```
+
+```{r}
+# Predicting the best Model
+results <- predict(best_model, task = d.tree.mlr.test)$data
+accuracy(results$truth, results$response)
+```
+
+```{r}
+# Tweaking multiple hyperparameters
+param_grid_multi <- makeParamSet( 
+  makeDiscreteParam("maxdepth", values=1:30),
+  makeNumericParam("cp", lower = 0.001, upper = 0.01),
+  makeDiscreteParam("minsplit", values=1:10)
+  )
+```
+
+```{r}
+dt_tuneparam_multi <- tuneParams(learner='classif.rpart', 
+                           task=d.tree.params, 
+                           resampling = resample,
+                           measures = measure,
+                           par.set=param_grid_multi, 
+                           control=control_grid, 
+                           show.info = TRUE)
+```
+
+```{r}
+# Extracting best Parameters from Multi Search
+best_parameters_multi = setHyperPars(
+  makeLearner("classif.rpart", predict.type = "prob"), 
+  par.vals = dt_tuneparam_multi$x
+)
+
+best_model_multi = train(best_parameters_multi, d.tree.params)
+```
+
+```{r}
+# Predicting the best Model
+results <- predict(best_model_multi, task = d.tree.mlr.test)$data
+accuracy(results$truth, results$response)
+
+```
+
+```{r}
+# Extracting results from multigrid
+result_hyperparam.multi <- generateHyperParsEffectData(dt_tuneparam_multi, partial.dep = TRUE)
+
+# Sampling just for visualization
+result_sample <- result_hyperparam.multi$data %>%
+  sample_n(300)
+```
+
+```{r}
+hyperparam.plot <- plot_ly(result_sample, 
+               x = ~cp, 
+               y = ~maxdepth, 
+               z = ~minsplit,
+               marker = list(color = ~f1.test.mean,  colorscale = list(c(0, 1), c("darkred", "darkgreen")), showscale = TRUE))
+hyperparam.plot <- hyperparam.plot %>% add_markers()
+hyperparam.plot
+```
+
+# Tree1
+
+```{r}
+library(tree)
+library(ISLR)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+tree = tree(state ~ ., train)
+summary(tree)
+tree
+```
+
+```{r}
+plot(tree)
+text(tree, pretty = 0)
+```
+
+```{r}
+cv_tree = cv.tree(tree, FUN = prune.misclass)
+plot(cv_tree$size, cv_tree$dev, type = "b")
+```
+
+```{r}
+prune_tree = prune.misclass(tree, best = 3)
+plot(prune_tree)
+text(prune_tree, pretty = 0)
+```
+
+```{r}
+tree_pred_val <- prune_tree %>% predict(X_val, type = "class")
+
+
+mean(tree_pred_val == y_val$state)
+```
+
+```{r}
+actual <- y_val$state
+pred <- tree_pred_val
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+#### tree1 test
+
+```{r}
+tree_pred_test <- prune_tree %>% predict(X_test, type = "class")
+mean(tree_pred_test == y_test$state)
+```
+
+```{r}
+actual <- y_test$state
+pred <- tree_pred_test
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+plot.roc(y_test$state,
+         as.numeric(tree_pred_test), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of LR")
+```
+
+# Tree2
+
+```{r}
+fitControl <- trainControl(method = "cv", number = 10)
+#fitControl <- y_val$state
+
+dtree <- train(
+  state ~ ., data = train, 
+  method = "ctree", trControl = fitControl
+)
+```
+
+```{r}
+dtree_pred_val <- dtree %>% predict(X_val)
+
+mean(dtree_pred_val == y_val$state)
+```
+
+```{r}
+actual <- y_val$state
+pred <- dtree_pred_val
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+#### tree2 test
+
+```{r}
+dtree_pred_test <- dtree %>% predict(X_test)
+mean(dtree_pred_test == y_test$state)
+```
+
+```{r}
+actual <- y_test$state
+pred <- dtree_pred_test
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+plot.roc(y_test$state,
+         as.numeric(dtree_pred_test), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of LR")
+```
+
+# Balanced data
+
+```{r}
+over <- ovun.sample(state~., data = train, method = "over", N = 102282)$data
+table(over$state)
+```
+
+```{r}
+fitControl <- trainControl(method = "cv", number = 10)
+#fitControl <- y_val$state
+
+dtree <- train(
+  state ~ ., data = over, 
+  method = "ctree", trControl = fitControl
+)
+```
+
+```{r}
+dtree_pred_val <- dtree %>% predict(X_val)
+
+mean(dtree_pred_val == y_val$state)
+```
+
+```{r}
+actual <- y_val$state
+pred <- dtree_pred_val
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+#### tree3 test
+
+```{r}
+dtree_pred_test <- dtree %>% predict(X_test)
+mean(dtree_pred_test == y_test$state)
+```
+
+```{r}
+actual <- y_test$state
+pred <- dtree_pred_test
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+plot.roc(y_test$state,
+         as.numeric(dtree_pred_test), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of LR")
+```

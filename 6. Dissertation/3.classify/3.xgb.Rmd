@@ -1,0 +1,382 @@
+---
+title: "4.xgb"
+output: html_document
+date: "2022-08-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+library(knitr)
+library(ggplot2)
+library(mice)
+library(lattice)
+library(reshape2)
+#install.packages("DataExplorer") if the following package is not available
+library(DataExplorer)
+library(visdat)
+library(ROSE)
+library(e1071)
+library(pROC)
+
+
+
+set.seed(100) # For reproducibility
+```
+
+```{r}
+df_train <- read_csv("outputs/df_train3.csv", show_col_types = FALSE)
+df_val <- read_csv("outputs/df_val3.csv", show_col_types = FALSE)
+df_test <- read_csv("outputs/df_test3.csv", show_col_types = FALSE)
+
+df_train = as.data.table(df_train)
+df_train$month = as.factor(df_train$month)
+df_train$weekdays = as.factor(df_train$weekdays)
+df_train$weekend = as.factor(df_train$weekend)
+df_train$quarter = as.factor(df_train$quarter)
+df_train$week = format(df_train$date, "%V")
+df_train = as.data.frame(df_train)
+df_train$week = as.numeric(df_train$week)
+df_train$state = as.factor(df_train$state)
+df_train
+
+
+df_val = as.data.table(df_val)
+df_val$month = as.factor(df_val$month)
+df_val$weekdays = as.factor(df_val$weekdays)
+df_val$weekend = as.factor(df_val$weekend)
+df_val$quarter = as.factor(df_val$quarter)
+df_val$week = format(df_val$date, "%V")
+df_val = as.data.frame(df_val)
+df_val$week = as.numeric(df_val$week)
+df_val$state = as.factor(df_val$state)
+df_val
+
+df_test = as.data.table(df_test)
+df_test$month = as.factor(df_test$month)
+df_test$weekdays = as.factor(df_test$weekdays)
+df_test$weekend = as.factor(df_test$weekend)
+df_test$quarter = as.factor(df_test$quarter)
+df_test$week = format(df_test$date, "%V")
+df_test = as.data.frame(df_test)
+df_test$week = as.numeric(df_test$week)
+df_test$state = as.factor(df_test$state)
+
+
+df_train$mday <- df_train$day 
+df_train$wday <- df_train$weekdays
+df_train$hr <- df_train$Hour
+df_train$qrtr <- df_train$quarter
+df_train$mnth <- df_train$month
+df_train$wend <- df_train$weekend
+df_train$rmean <- df_train$rolling_mean
+df_train$rmed <- df_train$rolling_median
+df_train$rskew <- df_train$rolling_skewness
+df_train$rkurt <- df_train$rolling_kurtosis
+df_train$rstd <- df_train$rolling_std
+df_train$rslope <- df_train$rolling_slope
+df_train$gas <- df_train$kwh
+df_train$l1 <- df_train$lag_1
+df_train$l2 <- df_train$lag_2
+df_train$l3 <- df_train$lag_3
+df_train$l4 <- df_train$lag_4
+df_train$l5 <- df_train$lag_5
+
+df_val$mday <- df_val$day 
+df_val$wday <- df_val$weekdays
+df_val$hr <- df_val$Hour
+df_val$qrtr <- df_val$quarter
+df_val$mnth <- df_val$month
+df_val$wend <- df_val$weekend
+df_val$rmean <- df_val$rolling_mean
+df_val$rmed <- df_val$rolling_median
+df_val$rskew <- df_val$rolling_skewness
+df_val$rkurt <- df_val$rolling_kurtosis
+df_val$rstd <- df_val$rolling_std
+df_val$rslope <- df_val$rolling_slope
+df_val$gas <- df_val$kwh
+df_val$l1 <- df_val$lag_1
+df_val$l2 <- df_val$lag_2
+df_val$l3 <- df_val$lag_3
+df_val$l4 <- df_val$lag_4
+df_val$l5 <- df_val$lag_5
+
+df_test$mday <- df_test$day 
+df_test$wday <- df_test$weekdays
+df_test$hr <- df_test$Hour
+df_test$qrtr <- df_test$quarter
+df_test$mnth <- df_test$month
+df_test$wend <- df_test$weekend
+df_test$rmean <- df_test$rolling_mean
+df_test$rmed <- df_test$rolling_median
+df_test$rskew <- df_test$rolling_skewness
+df_test$rkurt <- df_test$rolling_kurtosis
+df_test$rstd <- df_test$rolling_std
+df_test$rslope <- df_test$rolling_slope
+df_test$gas <- df_test$kwh
+df_test$l1 <- df_test$lag_1
+df_test$l2 <- df_test$lag_2
+df_test$l3 <- df_test$lag_3
+df_test$l4 <- df_test$lag_4
+df_test$l5 <- df_test$lag_5
+```
+
+```{r}
+train <- subset(df_train, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+val <- subset(df_val, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+test <- subset(df_test, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+```
+
+```{r}
+#Separate X and Y (for validation)
+X_train <- train %>% 
+  select(!contains(c("state")))
+X_val <- val %>% 
+  select(!contains(c("state")))
+X_test <- test %>% 
+  select(!contains(c("state")))
+
+y_train <- train %>% select('state')
+y_val <- val %>% select('state')
+y_test <- test %>% select('state')
+
+X_train
+y_train
+
+X_val
+y_val
+
+X_test
+y_test
+```
+
+```{r}
+library(Matrix)
+sparse_matrix1 <- sparse.model.matrix(state ~ ., data = train)[,-1]
+sparse_matrix2 <- sparse.model.matrix(state ~ ., data = val)[,-1]
+sparse_matrix3 <- sparse.model.matrix(state ~ ., data = test)[,-1]
+```
+
+```{r}
+library(xgboost)
+
+label <- as.numeric(y_train$state)-1
+train_matrix <- xgb.DMatrix(sparse_matrix1, label = label)
+
+label <- as.numeric(y_val$state)-1
+val_matrix <- xgb.DMatrix(sparse_matrix2, label = label)
+
+label <- as.numeric(y_test$state)-1
+test_matrix <- xgb.DMatrix(sparse_matrix3, label = label)
+```
+
+# XGB0
+
+```{r}
+#default parameters
+params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma=0, max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1)
+```
+
+```{r}
+xgbcv <- xgb.cv( params = params, data = train_matrix, nrounds = 100, nfold = 5, showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
+##best iteration
+```
+
+```{r}
+#first default - model training
+xgb1 <- xgb.train (params = params, data = train_matrix, nrounds = 100, 
+                   watchlist = list(val=val_matrix,train=train_matrix), 
+                   print.every.n = 10, early.stop.round = 10, maximize = F , eval_metric = "error")
+
+#model prediction
+xgbpred <- predict (xgb1,train_matrix)
+xgbpred <- ifelse (xgbpred > 0.5,1,0)
+```
+
+```{r}
+xgbpred <- as.factor(xgbpred)
+
+actual <- y_train$state
+pred <- xgbpred
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+plot.roc(y_train$state,
+         as.numeric(xgbpred), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of XGB")
+```
+
+#### xgb0 test
+
+```{r}
+#model prediction
+xgbpred <- predict (xgb1,test_matrix)
+xgbpred <- ifelse (xgbpred > 0.5,1,0)
+```
+
+```{r}
+xgbpred <- as.factor(xgbpred)
+
+actual <- y_test$state
+pred <- xgbpred
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+cm_d <- 
+  as.data.frame(as.table(confusionMatrix(pred, actual, mode = "everything", positive="1")))
+
+cm_d <- cm_d %>% rename(Actual = Reference)
+cm_d$classes <- 2
+cm_d$model <- "XGB"
+
+png(paste0("XGB_cm1.png"), width = 125, height = 75, units='mm', res = 700)
+
+ggplot(cm_d, aes(x = Actual, y = Prediction, fill = Freq)) + 
+  geom_tile() + 
+  coord_equal() +
+  scale_fill_gradient2(guide=FALSE,low='grey70',high='gray45',midpoint=10000) + 
+  guides(fill = "none") + labs(title = "Unbalanced") + 
+  geom_text(aes(label = Freq), color = "black") + theme_tufte() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+plot.roc(y_test$state,
+         as.numeric(xgbpred), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of XGB")
+```
+
+# XGB0 - balanced
+
+```{r}
+over <- ovun.sample(state~., data = train, method = "over", N = 102282)$data
+table(over$state)
+```
+
+```{r}
+sparse_matrix1 <- sparse.model.matrix(state ~ ., data = over)[,-1]
+sparse_matrix2 <- sparse.model.matrix(state ~ ., data = val)[,-1]
+sparse_matrix3 <- sparse.model.matrix(state ~ ., data = test)[,-1]
+```
+
+```{r}
+label <- as.numeric(over$state)-1
+train_matrix <- xgb.DMatrix(sparse_matrix1, label = label)
+
+label <- as.numeric(y_val$state)-1
+val_matrix <- xgb.DMatrix(sparse_matrix2, label = label)
+
+label <- as.numeric(y_test$state)-1
+test_matrix <- xgb.DMatrix(sparse_matrix3, label = label)
+```
+
+```{r}
+#default parameters
+params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma=0, max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1)
+```
+
+```{r}
+xgbcv <- xgb.cv( params = params, data = train_matrix, nrounds = 100, nfold = 5, showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
+##best iteration
+```
+
+```{r}
+#first default - model training
+xgb1 <- xgb.train (params = params, data = train_matrix, nrounds = 100, 
+                   watchlist = list(val=val_matrix,train=train_matrix), 
+                   print.every.n = 10, early.stop.round = 10, maximize = F , eval_metric = "error")
+
+#model prediction
+xgbpred <- predict (xgb1,train_matrix)
+xgbpred <- ifelse (xgbpred > 0.5,1,0)
+```
+
+```{r}
+xgbpred <- as.factor(xgbpred)
+
+actual <- over$state
+pred <- xgbpred
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+plot.roc(over$state,
+         as.numeric(xgbpred), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of XGB")
+```
+
+#### xgb0 bal test
+
+```{r}
+#model prediction
+xgbpred <- predict (xgb1,test_matrix)
+xgbpred <- ifelse (xgbpred > 0.5,1,0)
+```
+
+```{r}
+xgbpred <- as.factor(xgbpred)
+
+actual <- y_test$state
+pred <- xgbpred
+
+confusionMatrix(pred, actual, mode = "everything", positive="1")
+```
+
+```{r}
+cm_d <- 
+  as.data.frame(as.table(confusionMatrix(pred, actual, mode = "everything", positive="1")))
+
+cm_d <- cm_d %>% rename(Actual = Reference)
+cm_d$classes <- 2
+cm_d$model <- "XGB"
+
+png(paste0("XGB2.png"), width = 125, height = 75, units='mm', res = 700)
+
+ggplot(cm_d, aes(x = Actual, y = Prediction, fill = Freq)) + 
+  geom_tile() + 
+  coord_equal() +
+  scale_fill_gradient2(guide=FALSE,low='grey70',high='gray45',midpoint=10000) + 
+  guides(fill = "none") + labs(title = "Balanced") + 
+  geom_text(aes(label = Freq), color = "black") + theme_tufte() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+plot.roc(y_test$state,
+         as.numeric(xgbpred), col = "blue",
+         lwd = 3, print.auc = TRUE, print.auc.y = 0.3,
+         main = "ROC-AUC of XGB")
+```
+
+```{r}
+importance_matrix <- xgb.importance(model = xgb1)
+print(importance_matrix)
+xgb.plot.importance(importance_matrix = importance_matrix)
+```

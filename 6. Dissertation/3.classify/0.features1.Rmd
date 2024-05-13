@@ -1,0 +1,304 @@
+---
+title: "feature_extraction"
+output: html_document
+date: "2022-08-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+# Import
+
+```{r}
+df_62 <- read_csv("../1.clean/outputs/62_main.csv", show_col_types = FALSE)
+df_63 <- read_csv("../1.clean/outputs/63_main.csv", show_col_types = FALSE)
+df_64 <- read_csv("../1.clean/outputs/64_main.csv", show_col_types = FALSE)
+df_66 <- read_csv("../1.clean/outputs/66_main.csv", show_col_types = FALSE)
+df_67 <- read_csv("../1.clean/outputs/67_main.csv", show_col_types = FALSE)
+df_68 <- read_csv("../1.clean/outputs/68_main.csv", show_col_types = FALSE)
+df_70 <- read_csv("../1.clean/outputs/70_main.csv", show_col_types = FALSE)
+df_73 <- read_csv("../1.clean/outputs/73_main.csv", show_col_types = FALSE)
+
+str(df_62)
+head(df_62)
+head(df_63)
+head(df_64)
+head(df_66)
+head(df_67)
+head(df_68)
+head(df_70)
+head(df_73)
+```
+
+#### 1. add id and choose relevant columns
+
+```{r}
+df_62$id <- 62
+df_63$id <- 63
+df_64$id <- 64
+df_66$id <- 66
+df_67$id <- 67
+df_68$id <- 68
+df_70$id <- 70
+df_73$id <- 73
+
+df_62$t_int <- df_62$tavg/10
+df_63$t_int <- df_63$tavg/10
+df_64$t_int <- df_64$tavg/10
+df_66$t_int <- df_66$tavg/10
+df_67$t_int <- df_67$tavg/10
+df_68$t_int <- df_68$tavg/10
+df_70$t_int <- df_70$tavg/10
+df_73$t_int <- df_73$tavg/10
+
+df_62$state <- df_62$tavg_state
+df_63$state <- df_63$tavg_state
+df_64$state <- df_64$tavg_state
+df_66$state <- df_66$tavg_state
+df_67$state <- df_67$tavg_state
+df_68$state <- df_68$tavg_state
+df_70$state <- df_70$tavg_state
+df_73$state <- df_73$tavg_state
+
+#df_62 <- subset(df_62, select = c("id","th","date","t_int","kwh","state"))
+#df_63 <- subset(df_63, select = c("id","th","date","t_int","kwh","state"))
+#df_64 <- subset(df_64, select = c("id","th","date","t_int","kwh","state"))
+#df_66 <- subset(df_66, select = c("id","th","date","t_int","kwh","state"))
+#df_67 <- subset(df_67, select = c("id","th","date","t_int","kwh","state"))
+#df_68 <- subset(df_68, select = c("id","th","date","t_int","kwh","state"))
+#df_70 <- subset(df_70, select = c("id","th","date","t_int","kwh","state"))
+#df_73 <- subset(df_73, select = c("id","th","date","t_int","kwh","state"))
+
+str(df_62)
+head(df_62)
+head(df_63)
+head(df_64)
+head(df_66)
+head(df_67)
+head(df_68)
+head(df_70)
+head(df_73)
+```
+
+#### 2. add external temperature
+
+```{r}
+df_ext <- read_csv("../0.data/forecast.csv", show_col_types = FALSE)
+df_ext$t <- (df_ext$maxtemp+df_ext$mintemp)/2
+df_ext$date <- df_ext$dateforecastfor
+df_ext <- subset(df_ext, select = c("date", "t"))
+df_ext <- df_ext %>%
+  mutate(date = as.POSIXct(paste(date), format='%d/%m/%Y'))
+df_ext
+```
+
+```{r}
+# aggragate temp to daily
+df_ext <- df_ext %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d')) %>%
+  group_by(date = cut(date, breaks="1 days")) %>%
+  summarize(t = mean(t))
+
+df_ext <- df_ext %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+
+df_ext
+```
+
+```{r}
+df_62_j <- as.data.table(df_ext)[as.data.table(df_62), on = .(date), roll = TRUE]
+df_63_j <- as.data.table(df_ext)[as.data.table(df_63), on = .(date), roll = TRUE]
+df_64_j <- as.data.table(df_ext)[as.data.table(df_64), on = .(date), roll = TRUE]
+df_66_j <- as.data.table(df_ext)[as.data.table(df_66), on = .(date), roll = TRUE]
+df_67_j <- as.data.table(df_ext)[as.data.table(df_67), on = .(date), roll = TRUE]
+df_68_j <- as.data.table(df_ext)[as.data.table(df_68), on = .(date), roll = TRUE]
+df_70_j <- as.data.table(df_ext)[as.data.table(df_70), on = .(date), roll = TRUE]
+df_73_j <- as.data.table(df_ext)[as.data.table(df_73), on = .(date), roll = TRUE]
+df_73_j
+```
+
+#### 3. plot
+
+```{r}
+df_plot <- rbind(df_62_j,df_63_j, df_64_j, df_66_j,df_67_j, df_68_j, df_70_j, df_73_j)
+df_plot <- df_plot %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+
+df_plot
+#df_plot <- subset(df_plot, select = c("id","date","t","kwh","t_int","t","state"))
+#df_plot$state <- as.factor(df_plot$state)
+```
+
+```{r}
+h <- hist(df_plot$th_state, breaks=2)
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, 1.5))
+```
+
+#### 3. combine all
+
+```{r}
+# df is everything
+df <- rbind(df_62_j,df_63_j, df_64_j, df_66_j,df_67_j, df_68_j, df_70_j, df_73_j)
+df <- subset(df, select = c("id","date","kwh","t_int","t","state"))
+df$state <- as.factor(df$state)
+
+#df_all is train and validation
+df_all <- rbind(df_62_j, df_64_j, df_66_j, df_68_j, df_70_j, df_73_j)
+df_all <- subset(df_all, select = c("id","date","kwh","t_int","t","state"))
+df_all$state <- as.factor(df_all$state)
+
+df_test <- rbind(df_63_j, df_67_j)
+df_test <- subset(df_test, select = c("id","date","kwh","t_int","t","state"))
+df_test$state <- as.factor(df_test$state)
+
+df_all
+df_test
+```
+
+```{r}
+library(timetk)
+df_val <- df_all %>% filter_by_time(.start_date = "2018-01", .end_date = "end")
+df_val
+
+df_train <- df_all %>% filter_by_time(.start_date = "start", .end_date = "2017-12-31")
+df_train
+```
+
+# Features
+
+```{r}
+df$yday = yday(df$date)
+df$quarter = quarter(df$date)
+df$month = lubridate::month(df$date)
+df$day = lubridate::day(df$date)
+df$weekdays = weekdays(df$date)
+df
+
+#df_all$year = lubridate::year(df_all$date)
+df_all$yday = yday(df_all$date)
+df_all$quarter = quarter(df_all$date)
+df_all$month = lubridate::month(df_all$date)
+df_all$day = lubridate::day(df_all$date)
+df_all$weekdays = weekdays(df_all$date)
+df_all
+
+#df_train$year = lubridate::year(df_train$date)
+df_train$yday = yday(df_train$date)
+df_train$quarter = quarter(df_train$date)
+df_train$month = lubridate::month(df_train$date)
+df_train$day = lubridate::day(df_train$date)
+df_train$weekdays = weekdays(df_train$date)
+df_train
+
+#df_val$year = lubridate::year(df_val$date)
+df_val$yday = yday(df_val$date)
+df_val$quarter = quarter(df_val$date)
+df_val$month = lubridate::month(df_val$date)
+df_val$day = lubridate::day(df_val$date)
+df_val$weekdays = weekdays(df_val$date)
+df_val
+
+#df_test$year = lubridate::year(df_test$date)
+df_test$yday = yday(df_test$date)
+df_test$quarter = quarter(df_test$date)
+df_test$month = lubridate::month(df_test$date)
+df_test$day = lubridate::day(df_test$date)
+df_test$weekdays = weekdays(df_test$date)
+df_test
+```
+
+```{r}
+df = as.data.table(df)
+df$month = as.factor(df$month)
+df$weekdays = factor(df$weekdays,levels = c("Monday", "Tuesday", "Wednesday","Thursday","Friday","Saturday",'Sunday'))
+df[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+df[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df$weekend = as.factor(df$weekend)
+#df_all$year = as.factor(df_all$year)
+df$quarter = as.factor(df$quarter)
+df$week = format(df$date, "%V")
+df = as.data.frame(df)
+df$week = as.integer(df$week)
+df
+
+df_all = as.data.table(df_all)
+df_all$month = as.factor(df_all$month)
+df_all$weekdays = factor(df_all$weekdays,levels = c("Monday", "Tuesday", "Wednesday","Thursday","Friday","Saturday",'Sunday'))
+df_all[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+df_all[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_all$weekend = as.factor(df_all$weekend)
+#df_all$year = as.factor(df_all$year)
+df_all$quarter = as.factor(df_all$quarter)
+df_all$week = format(df_all$date, "%V")
+df_all = as.data.frame(df_all)
+df_all$week = as.integer(df_all$week)
+df_all
+
+df_train = as.data.table(df_train)
+df_train$month = as.factor(df_train$month)
+df_train$weekdays = factor(df_train$weekdays,levels = c("Monday", "Tuesday", "Wednesday","Thursday","Friday","Saturday",'Sunday'))
+df_train[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+df_train[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_train$weekend = as.factor(df_train$weekend)
+#df_train$year = as.factor(df_train$year)
+df_train$quarter = as.factor(df_train$quarter)
+df_train$week = format(df_train$date, "%V")
+df_train = as.data.frame(df_train)
+df_train$week = as.integer(df_train$week)
+df_train
+
+df_val = as.data.table(df_val)
+df_val$month = as.factor(df_val$month)
+df_val$weekdays = factor(df_val$weekdays,levels = c("Monday", "Tuesday", "Wednesday","Thursday","Friday","Saturday",'Sunday'))
+df_val[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+df_val[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_val$weekend = as.factor(df_val$weekend)
+#df_val$year = as.factor(df_val$year)
+df_val$quarter = as.factor(df_val$quarter)
+df_val$week = format(df_val$date, "%V")
+df_val = as.data.frame(df_val)
+df_val$week = as.integer(df_val$week)
+df_val
+
+df_test = as.data.table(df_test)
+df_test$month = as.factor(df_test$month)
+df_test$weekdays = factor(df_test$weekdays,levels = c("Monday", "Tuesday", "Wednesday","Thursday","Friday","Saturday",'Sunday'))
+df_test[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+df_test[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_test$weekend = as.factor(df_test$weekend)
+#df_test$year = as.factor(df_test$year)
+df_test$quarter = as.factor(df_test$quarter)
+df_test$week = format(df_test$date, "%V")
+df_test = as.data.frame(df_test)
+df_test$week = as.integer(df_test$week)
+df_test
+```
+
+```{r}
+write.csv(df,"outputs/df1.csv", row.names = FALSE)
+write.csv(df_all,"outputs/df_all1.csv", row.names = FALSE)
+write.csv(df_train,"outputs/df_train1.csv", row.names = FALSE)
+write.csv(df_val,"outputs/df_val1.csv", row.names = FALSE)
+write.csv(df_test,"outputs/df_test1.csv", row.names = FALSE)
+```

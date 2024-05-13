@@ -1,0 +1,210 @@
+---
+title: "features3"
+output: html_document
+date: "2022-08-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+```{r}
+df <- read_csv("outputs/df2.csv", show_col_types = FALSE)
+df_all <- read_csv("outputs/df_all2.csv", show_col_types = FALSE)
+df_train <- read_csv("outputs/df_train2.csv", show_col_types = FALSE)
+df_val <- read_csv("outputs/df_val2.csv", show_col_types = FALSE)
+df_test <- read_csv("outputs/df_test2.csv", show_col_types = FALSE)
+df_all
+```
+
+```{r}
+library(timetk)
+df <- df %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_all <- df_all %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_train <- df_train %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_val <- df_val %>% filter_by_time(.start_date = "2018-01-01 02:30:00", .end_date = "end")
+df_test <- df_test %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_all
+```
+
+```{r}
+df <- df %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+df_all <- df_all %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+df_train <- df_train %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+df_val <- df_val %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+df_test <- df_test %>% filter(!(months(as.Date(date)) %in% c('May','June','July','August','September')))
+df_all
+```
+
+```{r}
+df %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_all %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_train %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_val %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_test %>% summarise(across(everything(), ~ sum(is.na(.))))
+```
+
+```{r}
+df[is.na(df)] <- 0
+df_all[is.na(df_all)] <- 0
+df_train[is.na(df_train)] <- 0
+df_val[is.na(df_val)] <- 0
+df_test[is.na(df_test)] <- 0
+
+df %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_all %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_train %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_val %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_test %>% summarise(across(everything(), ~ sum(is.na(.))))
+```
+
+```{r}
+write.csv(df,"outputs/df3.csv", row.names = FALSE)
+write.csv(df_all,"outputs/df_all3.csv", row.names = FALSE)
+write.csv(df_train,"outputs/df_train3.csv", row.names = FALSE)
+write.csv(df_val,"outputs/df_val3.csv", row.names = FALSE)
+write.csv(df_test,"outputs/df_test3.csv", row.names = FALSE)
+```
+
+## Explore
+
+```{r}
+
+df_all = as.data.table(df_all)
+df_all$month = as.factor(df_all$month)
+df_all$weekdays = as.factor(df_all$weekdays)
+#df_all[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+#df_all[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_all$weekend = as.factor(df_all$weekend)
+#df_all$year = as.factor(df_all$year)
+df_all$quarter = as.factor(df_all$quarter)
+df_all$week = format(df_all$date, "%V")
+df_all = as.data.frame(df_all)
+df_all$week = as.integer(df_all$week)
+df_all$state = as.factor(df_all$state)
+df_all
+
+df_train = as.data.table(df_train)
+df_train$month = as.factor(df_train$month)
+df_train$weekdays = as.factor(df_train$weekdays)
+df_train$weekend = as.factor(df_train$weekend)
+df_train$quarter = as.factor(df_train$quarter)
+df_train$week = format(df_train$date, "%V")
+df_train = as.data.frame(df_train)
+df_train$week = as.integer(df_train$week)
+df_train$state = as.factor(df_train$state)
+df_train
+
+
+df_val = as.data.table(df_val)
+df_val$month = as.factor(df_val$month)
+df_val$weekdays = as.factor(df_val$weekdays)
+df_val$weekend = as.factor(df_val$weekend)
+df_val$quarter = as.factor(df_val$quarter)
+df_val$week = format(df_val$date, "%V")
+df_val = as.data.frame(df_val)
+df_val$week = as.integer(df_val$week)
+df_val$state = as.factor(df_val$state)
+df_val
+
+df_test = as.data.table(df_test)
+df_test$month = as.factor(df_test$month)
+df_test$weekdays = as.factor(df_test$weekdays)
+df_test$weekend = as.factor(df_test$weekend)
+df_test$quarter = as.factor(df_test$quarter)
+df_test$week = format(df_test$date, "%V")
+df_test = as.data.frame(df_test)
+df_test$week = as.integer(df_test$week)
+df_test$state = as.factor(df_test$state)
+df_test
+
+```
+
+```{r}
+glimpse(df_all)
+```
+
+```{r}
+library(visdat)
+
+df_all %>% sample_frac(0.1) %>% vis_dat()
+df_all %>% sample_frac(0.1) %>% vis_miss( ,sort_miss = TRUE)
+```
+
+```{r}
+
+```
+
+```{r}
+library(skimr)
+skim(df_all)
+```
+
+```{r}
+library(GGally)
+
+df_all %>% 
+  select(
+    kwh, t) %>% 
+  ggscatmat(alpha = 0.2)
+```
+
+```{r}
+df_all %>% 
+  select(
+    kwh, t, state) %>% 
+  ggpairs()
+```
+
+```{r}
+#mape <- function(actual,pred){
+#  mape <- mean(abs((actual - pred)/actual))*100
+#  return (mape)
+#}
+```
+
+```{r}
+#set.seed(100)
+
+#library(randomForest)
+
+#rf = randomForest(state ~ t + year + yday + quarter + month + day + weekend + week + Hour +
+#                    kwh + lag_1 + lag_2 + lag_3 + lag_4 + lag_5 + rolling_mean + rolling_median, data = train)
+
+#print(rf)
+```
+
+```{r}
+df_plot <- as_tbl_time(df_train, date)
+df_plot <- df_plot %>%
+  filter_time('2017-01-21 05:00' ~ '2017-01-21 07:00')
+```
+
+```{r}
+ggplot() +
+  geom_line(data=df_plot, aes(x=date, y=kwh), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_plot, aes(x=date, y=rolling_slope), 
+            alpha=0.3,  color="red")
+```

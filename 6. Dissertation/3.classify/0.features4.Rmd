@@ -1,0 +1,651 @@
+---
+title: "features4"
+output: html_document
+date: "2022-08-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+```{r}
+df <- read_csv("outputs/df2.csv", show_col_types = FALSE)
+df_all <- read_csv("outputs/df_all2.csv", show_col_types = FALSE)
+df_train <- read_csv("outputs/df_train2.csv", show_col_types = FALSE)
+df_val <- read_csv("outputs/df_val2.csv", show_col_types = FALSE)
+df_test <- read_csv("outputs/df_test2.csv", show_col_types = FALSE)
+df_all
+```
+
+```{r}
+library(timetk)
+df <- df %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_all <- df_all %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_train <- df_train %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_val <- df_val %>% filter_by_time(.start_date = "2018-01-01 02:30:00", .end_date = "end")
+df_test <- df_test %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_all
+```
+
+```{r}
+df %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_all %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_train %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_val %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_test %>% summarise(across(everything(), ~ sum(is.na(.))))
+```
+
+```{r}
+df[is.na(df)] <- 0
+df_all[is.na(df_all)] <- 0
+df_train[is.na(df_train)] <- 0
+df_val[is.na(df_val)] <- 0
+df_test[is.na(df_test)] <- 0
+
+df %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_all %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_train %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_val %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_test %>% summarise(across(everything(), ~ sum(is.na(.))))
+```
+
+```{r}
+df_all = as.data.table(df_all)
+df_all$month = as.factor(df_all$month)
+df_all$weekdays = as.factor(df_all$weekdays)
+#df_all[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+#df_all[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_all$weekend = as.factor(df_all$weekend)
+#df_all$year = as.factor(df_all$year)
+df_all$quarter = as.factor(df_all$quarter)
+df_all$week = format(df_all$date, "%V")
+df_all = as.data.frame(df_all)
+df_all$week = as.numeric(df_all$week)
+df_all$state = as.factor(df_all$state)
+df_all
+
+df = as.data.table(df)
+df$month = as.factor(df$month)
+df$weekdays = as.factor(df$weekdays)
+df$weekend = as.factor(df$weekend)
+df$quarter = as.factor(df$quarter)
+df$week = format(df$date, "%V")
+df = as.data.frame(df)
+df$week = as.numeric(df$week)
+df$state = as.factor(df$state)
+df
+
+df_train = as.data.table(df_train)
+df_train$month = as.factor(df_train$month)
+df_train$weekdays = as.factor(df_train$weekdays)
+df_train$weekend = as.factor(df_train$weekend)
+df_train$quarter = as.factor(df_train$quarter)
+df_train$week = format(df_train$date, "%V")
+df_train = as.data.frame(df_train)
+df_train$week = as.numeric(df_train$week)
+df_train$state = as.factor(df_train$state)
+df_train
+
+
+df_val = as.data.table(df_val)
+df_val$month = as.factor(df_val$month)
+df_val$weekdays = as.factor(df_val$weekdays)
+df_val$weekend = as.factor(df_val$weekend)
+df_val$quarter = as.factor(df_val$quarter)
+df_val$week = format(df_val$date, "%V")
+df_val = as.data.frame(df_val)
+df_val$week = as.numeric(df_val$week)
+df_val$state = as.factor(df_val$state)
+df_val
+
+df_test = as.data.table(df_test)
+df_test$month = as.factor(df_test$month)
+df_test$weekdays = as.factor(df_test$weekdays)
+df_test$weekend = as.factor(df_test$weekend)
+df_test$quarter = as.factor(df_test$quarter)
+df_test$week = format(df_test$date, "%V")
+df_test = as.data.frame(df_test)
+df_test$week = as.numeric(df_test$week)
+df_test$state = as.factor(df_test$state)
+df_test
+```
+
+```{r}
+df_all$mday <- df_all$day 
+df_all$wday <- df_all$weekdays
+df_all$hr <- df_all$Hour
+df_all$qrtr <- df_all$quarter
+df_all$mnth <- df_all$month
+df_all$wend <- df_all$weekend
+df_all$rmean <- df_all$rolling_mean
+df_all$rmed <- df_all$rolling_median
+df_all$rskew <- df_all$rolling_skewness
+df_all$rkurt <- df_all$rolling_kurtosis
+df_all$rstd <- df_all$rolling_std
+df_all$rslope <- df_all$rolling_slope
+df_all$gas <- df_all$kwh
+df_all$l1 <- df_all$lag_1
+df_all$l2 <- df_all$lag_2
+df_all$l3 <- df_all$lag_3
+df_all$l4 <- df_all$lag_4
+df_all$l5 <- df_all$lag_5
+
+df$mday <- df$day 
+df$wday <- df$weekdays
+df$hr <- df$Hour
+df$qrtr <- df$quarter
+df$mnth <- df$month
+df$wend <- df$weekend
+df$rmean <- df$rolling_mean
+df$rmed <- df$rolling_median
+df$rskew <- df$rolling_skewness
+df$rkurt <- df$rolling_kurtosis
+df$rstd <- df$rolling_std
+df$rslope <- df$rolling_slope
+df$gas <- df$kwh
+df$l1 <- df$lag_1
+df$l2 <- df$lag_2
+df$l3 <- df$lag_3
+df$l4 <- df$lag_4
+df$l5 <- df$lag_5
+
+df_train$mday <- df_train$day 
+df_train$wday <- df_train$weekdays
+df_train$hr <- df_train$Hour
+df_train$qrtr <- df_train$quarter
+df_train$mnth <- df_train$month
+df_train$wend <- df_train$weekend
+df_train$rmean <- df_train$rolling_mean
+df_train$rmed <- df_train$rolling_median
+df_train$rskew <- df_train$rolling_skewness
+df_train$rkurt <- df_train$rolling_kurtosis
+df_train$rstd <- df_train$rolling_std
+df_train$rslope <- df_train$rolling_slope
+df_train$gas <- df_train$kwh
+df_train$l1 <- df_train$lag_1
+df_train$l2 <- df_train$lag_2
+df_train$l3 <- df_train$lag_3
+df_train$l4 <- df_train$lag_4
+df_train$l5 <- df_train$lag_5
+
+df_val$mday <- df_val$day 
+df_val$wday <- df_val$weekdays
+df_val$hr <- df_val$Hour
+df_val$qrtr <- df_val$quarter
+df_val$mnth <- df_val$month
+df_val$wend <- df_val$weekend
+df_val$rmean <- df_val$rolling_mean
+df_val$rmed <- df_val$rolling_median
+df_val$rskew <- df_val$rolling_skewness
+df_val$rkurt <- df_val$rolling_kurtosis
+df_val$rstd <- df_val$rolling_std
+df_val$rslope <- df_val$rolling_slope
+df_val$gas <- df_val$kwh
+df_val$l1 <- df_val$lag_1
+df_val$l2 <- df_val$lag_2
+df_val$l3 <- df_val$lag_3
+df_val$l4 <- df_val$lag_4
+df_val$l5 <- df_val$lag_5
+
+df_test$mday <- df_test$day 
+df_test$wday <- df_test$weekdays
+df_test$hr <- df_test$Hour
+df_test$qrtr <- df_test$quarter
+df_test$mnth <- df_test$month
+df_test$wend <- df_test$weekend
+df_test$rmean <- df_test$rolling_mean
+df_test$rmed <- df_test$rolling_median
+df_test$rskew <- df_test$rolling_skewness
+df_test$rkurt <- df_test$rolling_kurtosis
+df_test$rstd <- df_test$rolling_std
+df_test$rslope <- df_test$rolling_slope
+df_test$gas <- df_test$kwh
+df_test$l1 <- df_test$lag_1
+df_test$l2 <- df_test$lag_2
+df_test$l3 <- df_test$lag_3
+df_test$l4 <- df_test$lag_4
+df_test$l5 <- df_test$lag_5
+```
+
+```{r}
+all <- subset(df_all, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+
+train <- subset(df_train, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+val <- subset(df_val, select = c('hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+test <- subset(df_test, select = c('id','date','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+
+
+dff <- subset(df, select = c('id','date','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+all
+```
+
+```{r}
+write.csv(all,"outputs/all.csv", row.names = FALSE)
+write.csv(train,"outputs/train.csv", row.names = FALSE)
+write.csv(val,"outputs/val.csv", row.names = FALSE)
+```
+
+```{r}
+ggplot(data=all, aes(x=date, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  theme_light()+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+```
+
+## Seasonality
+
+#### day
+
+```{r}
+all_yday <- all %>% 
+  group_by(id, yday) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+all_yday <- aggregate(gas ~ yday, data=all_yday, mean)
+
+train_yday <- train %>% 
+  group_by(id, yday) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+train_yday <- aggregate(gas ~ yday, data=train_yday, mean)
+
+val_yday <- val %>% 
+  group_by(id, yday) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+val_yday <- aggregate(gas ~ yday, data=val_yday, mean)
+
+test_yday <- test %>% 
+  group_by(id, yday) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+test_yday <- aggregate(gas ~ yday, data=test_yday, mean)
+```
+
+```{r}
+ggplot(data=all_yday, aes(x=yday, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  xlim(1,365)+ ylim(0,1.5)+
+  theme_light()+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+
+ggplot(data=train_yday, aes(x=yday, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  xlim(1,365)+ ylim(0,1.5)+
+  theme_light()+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+
+ggplot(data=val_yday, aes(x=yday, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  xlim(1,365)+ ylim(0,1.5)+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  theme_light()+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+ggplot(data=test_yday, aes(x=yday, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  xlim(1,365)+ ylim(0,1.5)+
+  theme_light()+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+```
+
+#### week
+
+```{r}
+all_week <- all %>% 
+  group_by(id, week) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+all_week <- aggregate(gas ~ week, data=all_week, mean)
+
+train_week <- train %>% 
+  group_by(id, week) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+train_week <- aggregate(gas ~ week, data=train_week, mean)
+
+val_week <- val %>% 
+  group_by(id, week) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+val_week <- aggregate(gas ~ week, data=val_week, mean)
+
+test_week <- test %>% 
+  group_by(id, week) %>% summarise(gas = mean(gas, na.rm = TRUE)) %>% 
+  ungroup()
+test_week <- aggregate(gas ~ week, data=test_week, mean)
+```
+
+```{r}
+ggplot(data=all_week, aes(x=week, y=gas/1000)) +
+  #geom_area(alpha=1, color="#69b3a2")+
+  #geom_point()+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  geom_line(color="#69b3a2", size=1, alpha=0.9) +
+  xlab("") + ylab("Monthly consumption (kwg/hh)") +
+  #xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+   #                         "6"="June","7"="July","8"="August","9"="September",
+   #                         "10"="October","11"="November","12"="December"))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Monthly Electricity Consumption (averaged between 2011 - 2014)")
+
+
+ggplot(data=train_week, aes(x=week, y=gas/1000)) +
+  #geom_area(alpha=1, color="#69b3a2")+
+  #geom_point()+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  geom_line(color="#69b3a2", size=1, alpha=0.9) +
+  xlab("") + ylab("Monthly consumption (kwg/hh)") +
+  #xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+   #                         "6"="June","7"="July","8"="August","9"="September",
+   #                         "10"="October","11"="November","12"="December"))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Monthly Electricity Consumption (averaged between 2011 - 2014)")
+
+
+ggplot(data=val_week, aes(x=week, y=gas/1000)) +
+  #geom_area(alpha=1, color="#69b3a2")+
+  #geom_point()+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  geom_line(color="#69b3a2", size=1, alpha=0.9) +
+  xlab("") + ylab("Monthly consumption (kwg/hh)") +
+  #xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+   #                         "6"="June","7"="July","8"="August","9"="September",
+   #                         "10"="October","11"="November","12"="December"))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Monthly Electricity Consumption (averaged between 2011 - 2014)")
+
+
+ggplot(data=test_week, aes(x=week, y=gas/1000)) +
+  #geom_area(alpha=1, color="#69b3a2")+
+  #geom_point()+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  geom_line(color="#69b3a2", size=1, alpha=0.9) +
+  xlab("") + ylab("Monthly consumption (kwg/hh)") +
+  #xlim(labels=c('1'="January","2"="February","3"="March","4"="April","5"="May",
+   #                         "6"="June","7"="July","8"="August","9"="September",
+   #                         "10"="October","11"="November","12"="December"))+
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  theme_light()+
+  ggtitle("Monthly Electricity Consumption (averaged between 2011 - 2014)")
+```
+
+#### month
+
+```{r}
+train_mnth <- train %>% 
+  group_by(id, mnth) %>% summarise(gas = sum(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+train_mnth <- aggregate(cbind(t,gas) ~ mnth, data=train_mnth, mean)
+
+val_mnth <- val %>% 
+  group_by(id, mnth) %>% summarise(gas = sum(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+val_mnth <- aggregate(cbind(t,gas) ~ mnth, data=val_mnth, mean)
+```
+
+```{r}
+
+
+```
+
+```{r}
+
+```
+
+`{#df_62_j, df_64_j, df_66_j, df_68_j, df_70_j, df_73_j}`
+
+```{r}
+
+colors <- c("2017 External Temperature" = "brown",
+            "2018 External Temperature" = "midnightblue")
+
+fills <- c("2017 Gas Consumption" = "grey60", 
+            "2018 Gas Consumption" = "#69b3a2")
+
+ggplot() +
+  
+  
+  geom_area(data=val_mnth, aes(x=mnth, y=gas/100000, fill="2018 Gas Consumption"), alpha=0.6) +
+  geom_line(data=val_mnth, aes(x=mnth, y=gas/100000), color="#69b3a2", size=1, alpha=1) +
+  
+  geom_area(data=train_mnth, aes(x=mnth, y=gas/100000, fill="2017 Gas Consumption"), alpha=0.6) +
+  geom_line(data=train_mnth, aes(x=mnth, y=gas/100000), color="grey20", size=1, alpha=1) +
+  
+  geom_line(data=train_mnth, aes(x=mnth, y=t, color="2017 External Temperature"), size=1, alpha=0.9) +
+  geom_line(data=val_mnth, aes(x=mnth, y=t, color="2018 External Temperature"), size=1, alpha=0.9) +
+  
+  scale_color_manual(values = colors)+labs(color = "") + 
+  scale_fill_manual(values = fills)+labs(fill = "") + 
+  
+  scale_y_continuous(name = "Average Monthly Temperature (°C)", 
+                     sec.axis = sec_axis(trans=~.*100, name="Total Monthly Gas Consumption (kWh)"))+
+
+  xlab("") +
+  scale_x_continuous(limits=c(1,5), labels=c('1'="January","2"="February","3"="March","4"="April","5"="May"))+
+  theme_tufte()+
+  theme(#axis.title.y = element_blank(), axis.title.y.right = element_blank(),
+        legend.position="bottom", legend.direction="vertical")
+  #ggtitle("Monthly Electricity Consumption")
+```
+
+```{r}
+ggsave('trend1.png', plot = last_plot(), dpi = 800, width = 6, height = 4)
+```
+
+## Weekly
+
+```{r}
+# aggragate to daily
+train_day <- train %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d')) %>%
+  group_by(id, date = cut(date, breaks="1 days")) %>%
+  summarize(t = mean(t), gas=sum(gas),wday=mean(wday))
+
+train_day <- train_day %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+
+# aggragate to daily
+val_day <- val %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d')) %>%
+  group_by(id,date = cut(date, breaks="1 days")) %>%
+  summarize(t = mean(t), gas=sum(gas),wday=mean(wday))
+
+val_day <- val_day %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d'))
+
+val_day
+```
+
+```{r}
+train_wday <- train %>% 
+  group_by(id, wday) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+train_wday <- aggregate(cbind(t,gas) ~ wday, data=train_wday, mean)
+
+val_wday <- val %>% 
+  group_by(id, wday) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+val_wday <- aggregate(cbind(t,gas) ~ wday, data=val_wday, mean)
+
+train_wday$wday <- train_wday$wday+1
+val_wday$wday <- val_wday$wday+1
+```
+
+```{r}
+colors <- c("External Temperature" = "brown", "Gas Consumption" = "grey20")
+            #"2018 External Temperature" = "midnightblue")
+
+#fills <- c("Gas Consumption" = "grey60") 
+            #"2018 Gas Consumption" = "#69b3a2")
+
+ggplot() +
+  
+  
+  #geom_area(data=val_wday, aes(x=wday, y=gas/100000, fill="2018 Gas Consumption"), alpha=0.6) +
+  #geom_line(data=val_wday, aes(x=wday, y=gas/100000), color="#69b3a2", size=1, alpha=1) +
+  
+  #geom_area(data=train_wday, aes(x=wday, y=gas/50, fill="Gas Consumption"), alpha=0.6) +
+  geom_line(data=train_wday, aes(x=wday, y=gas/50, color="Gas Consumption"), size=1, alpha=1) +
+  
+  geom_line(data=train_wday, aes(x=wday, y=t, color="External Temperature"), size=1, alpha=0.9) +
+  #geom_line(data=val_wday, aes(x=wday, y=t, color="2018 External Temperature"), size=1, alpha=0.9) +
+  
+  scale_color_manual(values = colors)+labs(color = "") + 
+  #scale_fill_manual(values = fills)+labs(fill = "") + 
+  #scale_x_continuous(limits=c(-1,7), labels=c("1"="Sunday","2"="Monday","3"="Tuesday",
+   #                           "4"="Wednesday","4"="Thursday","5"="Friday"))+
+  
+  xlim(labels=c("1"="Sunday","2"="Monday",
+                              "3"="Tuesday","4"="Wednesday","5"="Thursday","6"="Friday","7"="Saturday"))+
+  
+  scale_y_continuous(limits=c(8,13),name = "Average Daily Temperature (°C)", 
+                     sec.axis = sec_axis(trans=~./20, name="Average Half-Hourly Gas Consumption (kWh)"))+
+
+  xlab("") +
+  theme_tufte()+
+  theme(#axis.title.y = element_blank(), axis.title.y.right = element_blank(),
+        legend.position="bottom")#, legend.direction="vertical")
+```
+
+```{r}
+ggsave('trend2.png', plot = last_plot(), dpi = 800, width = 6, height = 4)
+```
+
+```{r}
+train_wk <- train[train$wend == 0,] 
+train_wend <- train[train$wend == 1,] 
+```
+
+```{r}
+h <- hist(train_wk$state, breaks=2)
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, 1.5))
+```
+
+```{r}
+h <- hist(train_wend$state, breaks=2)
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, 1.5))
+```
+
+## Daily
+
+```{r}
+
+all_hr <- all %>% 
+  group_by(id, hr) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+all_hr <- aggregate(cbind(t,gas) ~ hr, data=all_hr, mean)
+
+
+train_hr <- train %>% 
+  group_by(id, hr) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+train_hr <- aggregate(cbind(t,gas) ~ hr, data=train_hr, mean)
+
+val_hr <- val %>% 
+  group_by(id, hr) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+val_hr <- aggregate(cbind(t,gas) ~ hr, data=val_hr, mean)
+```
+
+```{r}
+
+ggplot() +
+  geom_area(data=all_hr, aes(x=hr, y=gas/1000), fill="grey60", alpha=0.6) +
+  geom_line(data=all_hr, aes(x=hr, y=gas/1000), color="grey20", size=1, alpha=0.9) +
+
+  xlab("Hours of the day") + ylab("Average Half-Hourly Gas Consumption (kWh)") + 
+
+  xlim(labels=c("2"="","3"="",'4'="04:00","5"="","6"="06:00","7"="",
+                "8"="08:00","9"="","10"="10:00","11"="","12"="12:00","13"="",
+                "14"="14:00","15"="","16"="16:00","17"="","18"="18:00","19"="",
+                "20"="20:00","21"="","22"="22:00","23"="","24"=""))+ ylim(0,1.5)+
+  theme_tufte() #+
+
+```
+
+```{r}
+ggplot(data=all_hr, aes(x=hr, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  #xlim(1,365)+ ylim(0,1.5)+
+  theme_light()+#ylim(0,1.2)+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+
+ggplot(data=train_hr, aes(x=hr, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(as.Date(c('2011-11-01','2014-02-01')))+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  #xlim(1,365)+ ylim(0,1.5)+
+  theme_light()+ #(0,1.2)+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+
+ggplot(data=val_hr, aes(x=hr, y=gas/1000)) +
+  geom_line(alpha=0.5, color="black")+
+  geom_area( fill="#69b3a2", alpha=0.6) +
+  xlab("") + ylab("Average daily consumption (kWh/hh)") +
+  #xlim(1,365)+ ylim(0,1.5)+
+  #xlim(as.Date(c('2012-10-01','2013-02-01')))+
+  theme_light()+#ylim(0,1.2)+
+  ggtitle("Daily Electricity Consumption (2011 - 2014)")
+
+```
+
+```{r}
+ggsave('trend3.png', plot = last_plot(), dpi = 800, width = 6, height = 4)
+```
