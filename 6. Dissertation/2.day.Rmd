@@ -1,0 +1,293 @@
+---
+title: "day"
+output: html_document
+date: "2022-08-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+```{r}
+df <- read_csv("3.classify/outputs/df2.csv", show_col_types = FALSE)
+df_all <- read_csv("3.classify/outputs/df_all2.csv", show_col_types = FALSE)
+df_train <- read_csv("3.classify/outputs/df_train2.csv", show_col_types = FALSE)
+df_val <- read_csv("3.classify/outputs/df_val2.csv", show_col_types = FALSE)
+df_test <- read_csv("3.classify/outputs/df_test2.csv", show_col_types = FALSE)
+df_all
+```
+
+```{r}
+library(timetk)
+df <- df %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_all <- df_all %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_train <- df_train %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_val <- df_val %>% filter_by_time(.start_date = "2018-01-01 02:30:00", .end_date = "end")
+df_test <- df_test %>% filter_by_time(.start_date = "2017-01-10 02:30:00", .end_date = "end")
+df_all
+```
+
+```{r}
+df[is.na(df)] <- 0
+df_all[is.na(df_all)] <- 0
+df_train[is.na(df_train)] <- 0
+df_val[is.na(df_val)] <- 0
+df_test[is.na(df_test)] <- 0
+
+df %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_all %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_train %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_val %>% summarise(across(everything(), ~ sum(is.na(.))))
+df_test %>% summarise(across(everything(), ~ sum(is.na(.))))
+```
+
+```{r}
+df_all = as.data.table(df_all)
+df_all$month = as.factor(df_all$month)
+df_all$weekdays = as.factor(df_all$weekdays)
+#df_all[weekdays %in% c("Saturday",'Sunday'),weekend:=1]
+#df_all[!(weekdays %in% c("Saturday",'Sunday')),weekend:=0]
+df_all$weekend = as.factor(df_all$weekend)
+#df_all$year = as.factor(df_all$year)
+df_all$quarter = as.factor(df_all$quarter)
+df_all$week = format(df_all$date, "%V")
+df_all = as.data.frame(df_all)
+df_all$week = as.numeric(df_all$week)
+df_all$state = as.factor(df_all$state)
+df_all
+
+df = as.data.table(df)
+df$month = as.factor(df$month)
+df$weekdays = as.factor(df$weekdays)
+df$weekend = as.factor(df$weekend)
+df$quarter = as.factor(df$quarter)
+df$week = format(df$date, "%V")
+df = as.data.frame(df)
+df$week = as.numeric(df$week)
+df$state = as.factor(df$state)
+df
+
+df_train = as.data.table(df_train)
+df_train$month = as.factor(df_train$month)
+df_train$weekdays = as.factor(df_train$weekdays)
+df_train$weekend = as.factor(df_train$weekend)
+df_train$quarter = as.factor(df_train$quarter)
+df_train$week = format(df_train$date, "%V")
+df_train = as.data.frame(df_train)
+df_train$week = as.numeric(df_train$week)
+df_train$state = as.factor(df_train$state)
+df_train
+
+
+df_val = as.data.table(df_val)
+df_val$month = as.factor(df_val$month)
+df_val$weekdays = as.factor(df_val$weekdays)
+df_val$weekend = as.factor(df_val$weekend)
+df_val$quarter = as.factor(df_val$quarter)
+df_val$week = format(df_val$date, "%V")
+df_val = as.data.frame(df_val)
+df_val$week = as.numeric(df_val$week)
+df_val$state = as.factor(df_val$state)
+df_val
+
+df_test = as.data.table(df_test)
+df_test$month = as.factor(df_test$month)
+df_test$weekdays = as.factor(df_test$weekdays)
+df_test$weekend = as.factor(df_test$weekend)
+df_test$quarter = as.factor(df_test$quarter)
+df_test$week = format(df_test$date, "%V")
+df_test = as.data.frame(df_test)
+df_test$week = as.numeric(df_test$week)
+df_test$state = as.factor(df_test$state)
+df_test
+```
+
+```{r}
+df_all$mday <- df_all$day 
+df_all$wday <- df_all$weekdays
+df_all$hr <- df_all$Hour
+df_all$qrtr <- df_all$quarter
+df_all$mnth <- df_all$month
+df_all$wend <- df_all$weekend
+df_all$rmean <- df_all$rolling_mean
+df_all$rmed <- df_all$rolling_median
+df_all$rskew <- df_all$rolling_skewness
+df_all$rkurt <- df_all$rolling_kurtosis
+df_all$rstd <- df_all$rolling_std
+df_all$rslope <- df_all$rolling_slope
+df_all$gas <- df_all$kwh
+df_all$l1 <- df_all$lag_1
+df_all$l2 <- df_all$lag_2
+df_all$l3 <- df_all$lag_3
+df_all$l4 <- df_all$lag_4
+df_all$l5 <- df_all$lag_5
+
+df$mday <- df$day 
+df$wday <- df$weekdays
+df$hr <- df$Hour
+df$qrtr <- df$quarter
+df$mnth <- df$month
+df$wend <- df$weekend
+df$rmean <- df$rolling_mean
+df$rmed <- df$rolling_median
+df$rskew <- df$rolling_skewness
+df$rkurt <- df$rolling_kurtosis
+df$rstd <- df$rolling_std
+df$rslope <- df$rolling_slope
+df$gas <- df$kwh
+df$l1 <- df$lag_1
+df$l2 <- df$lag_2
+df$l3 <- df$lag_3
+df$l4 <- df$lag_4
+df$l5 <- df$lag_5
+
+df_train$mday <- df_train$day 
+df_train$wday <- df_train$weekdays
+df_train$hr <- df_train$Hour
+df_train$qrtr <- df_train$quarter
+df_train$mnth <- df_train$month
+df_train$wend <- df_train$weekend
+df_train$rmean <- df_train$rolling_mean
+df_train$rmed <- df_train$rolling_median
+df_train$rskew <- df_train$rolling_skewness
+df_train$rkurt <- df_train$rolling_kurtosis
+df_train$rstd <- df_train$rolling_std
+df_train$rslope <- df_train$rolling_slope
+df_train$gas <- df_train$kwh
+df_train$l1 <- df_train$lag_1
+df_train$l2 <- df_train$lag_2
+df_train$l3 <- df_train$lag_3
+df_train$l4 <- df_train$lag_4
+df_train$l5 <- df_train$lag_5
+
+df_val$mday <- df_val$day 
+df_val$wday <- df_val$weekdays
+df_val$hr <- df_val$Hour
+df_val$qrtr <- df_val$quarter
+df_val$mnth <- df_val$month
+df_val$wend <- df_val$weekend
+df_val$rmean <- df_val$rolling_mean
+df_val$rmed <- df_val$rolling_median
+df_val$rskew <- df_val$rolling_skewness
+df_val$rkurt <- df_val$rolling_kurtosis
+df_val$rstd <- df_val$rolling_std
+df_val$rslope <- df_val$rolling_slope
+df_val$gas <- df_val$kwh
+df_val$l1 <- df_val$lag_1
+df_val$l2 <- df_val$lag_2
+df_val$l3 <- df_val$lag_3
+df_val$l4 <- df_val$lag_4
+df_val$l5 <- df_val$lag_5
+
+df_test$mday <- df_test$day 
+df_test$wday <- df_test$weekdays
+df_test$hr <- df_test$Hour
+df_test$qrtr <- df_test$quarter
+df_test$mnth <- df_test$month
+df_test$wend <- df_test$weekend
+df_test$rmean <- df_test$rolling_mean
+df_test$rmed <- df_test$rolling_median
+df_test$rskew <- df_test$rolling_skewness
+df_test$rkurt <- df_test$rolling_kurtosis
+df_test$rstd <- df_test$rolling_std
+df_test$rslope <- df_test$rolling_slope
+df_test$gas <- df_test$kwh
+df_test$l1 <- df_test$lag_1
+df_test$l2 <- df_test$lag_2
+df_test$l3 <- df_test$lag_3
+df_test$l4 <- df_test$lag_4
+df_test$l5 <- df_test$lag_5
+```
+
+```{r}
+all <- subset(df_all, select = c('id','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+
+train <- subset(df_train, select = c('id','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+val <- subset(df_val, select = c('id','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+test <- subset(df_test, select = c('id','date','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+
+
+dff <- subset(df, select = c('id','date','hr','yday','mday','wday','wend','week','mnth','qrtr','t','gas',
+                                   'l1','l2','l3','l4','l5','rmean','rmed','rstd','rslope','rskew','rkurt',
+                                   'state'))
+all
+```
+
+# Daily
+
+```{r}
+all_hr <- all %>% 
+  group_by(id, hr) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+#all_hr <- aggregate(cbind(t,gas) ~ hr, data=all_hr, mean)
+
+
+train_hr <- train %>% 
+  group_by(id, hr) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+#train_hr <- aggregate(cbind(t,gas) ~ hr, data=train_hr, mean)
+
+val_hr <- val %>% 
+  group_by(id, hr) %>% summarise(gas = mean(gas, na.rm = TRUE), t = mean(t, na.rm = TRUE)) %>% 
+  ungroup()
+#val_hr <- aggregate(cbind(t,gas) ~ hr, data=val_hr, mean)
+```
+
+```{r}
+ggplot() +
+  #geom_area(data=all_hr, aes(x=hr, y=gas/1000), fill="grey60", alpha=0.6) +
+  geom_line(data=all_hr, aes(x=hr, y=gas/1000, color = id), size=1, alpha=0.9) +
+
+  xlab("Hours of the day") + ylab("Average Half-Hourly Gas Consumption (kWh)") + 
+
+  xlim(labels=c("2"="","3"="",'4'="04:00","5"="","6"="06:00","7"="",
+                "8"="08:00","9"="","10"="10:00","11"="","12"="12:00","13"="",
+                "14"="14:00","15"="","16"="16:00","17"="","18"="18:00","19"="",
+                "20"="20:00","21"="","22"="22:00","23"="","24"=""))+ ylim(0,1.5)+
+  theme_tufte() #+
+```
+
+```{r}
+p <- ggplot(data = all_hr, aes(x = hr, y = gas/1000, group = id))
+p + geom_line(aes(color=as.factor(id))) + scale_color_discrete() + labs(color="Home")+
+  xlab("Hours of the day") + ylab("Average Half-Hourly Gas Consumption (kWh)") +
+  xlim(labels=c("2"="","3"="",'4'="04:00","5"="","6"="06:00","7"="",
+                "8"="08:00","9"="","10"="10:00","11"="","12"="12:00","13"="",
+                "14"="14:00","15"="","16"="16:00","17"="","18"="18:00","19"="",
+                "20"="20:00","21"="","22"="22:00","23"="","24"=""))+ ylim(0,3)+
+  theme_tufte() #+
+
+```
+
+```{r}
+ggsave('spag.png', plot = last_plot(), dpi = 800, width = 6, height = 4)
+```

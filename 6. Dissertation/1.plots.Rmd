@@ -1,0 +1,118 @@
+---
+title: "Plots"
+output: html_document
+date: "2022-08-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(lubridate)
+library(ggthemes)
+
+
+set.seed(100) # For reproducibility
+```
+
+```{r}
+df <- read_csv("3.classify/outputs/df3.csv", show_col_types = FALSE)
+df_all <- read_csv("3.classify/outputs/df_all3.csv", show_col_types = FALSE)
+df
+df_all
+```
+
+```{r}
+df_62_main <- read_csv("1.clean/outputs/62_main.csv", show_col_types = FALSE)
+df_62 <- read_csv("1.clean/outputs/62_main.csv", show_col_types = FALSE)
+df_62 <- read_csv("1.clean/outputs/62_main.csv", show_col_types = FALSE)
+
+```
+
+```{r}
+df_62_plot <- as_tbl_time(df_62, date)
+df_62_plot <- df_62_plot %>%
+  filter_time('2017-03-20' ~ '2017-03-25')
+
+df_63_plot <- as_tbl_time(df_63, date)
+df_63_plot <- df_63_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_64_plot <- as_tbl_time(df_64, date)
+df_64_plot <- df_64_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_66_plot <- as_tbl_time(df_66, date)
+df_66_plot <- df_66_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_67_plot <- as_tbl_time(df_67, date)
+df_67_plot <- df_67_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_68_plot <- as_tbl_time(df_68, date)
+df_68_plot <- df_68_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_70_plot <- as_tbl_time(df_70, date)
+df_70_plot <- df_70_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+
+df_73_plot <- as_tbl_time(df_73, date)
+df_73_plot <- df_73_plot %>%
+  filter_time('2017-01-21' ~ '2017-01-21')
+```
+
+```{r}
+ggplot(df_62_plot) +
+  geom_line(aes(x=date, y=kwh), color="ivory4", alpha=1, size=0.5) + theme_tufte() +
+  xlab("") + ylab("Gas Pulse")
+  
+  
+  #theme(axis.title.y = element_blank(), axis.title.y.right = element_blank(),
+     #   legend.position="bottom", legend.direction="horizontal")
+```
+
+```{r}
+colors <- c("Gas Pulse" = "ivory4", 
+            "Heating Flow Temperature" = "lightpink1", 
+            "L1" = "lightsalmon4", 
+            "L2" = "midnightblue", 
+            "L3" = "mediumorchid4")
+
+p0 <- ggplot(df_62_plot) +
+  geom_line(aes(x=date, y=kwh/100, color="Gas Pulse"), alpha=0.4, size=1.5) +
+  geom_line(aes(x=date, y=th/10, color="Heating Flow Temperature"), alpha=0.4, size=1.5) +
+  scale_y_continuous(name = "Temperature (°C)", sec.axis = sec_axis(trans=~./10, name="Gas Pulse (kWh)"))
+```
+
+```{r}
+p0 + scale_color_manual(values = colors) + theme_tufte() + 
+  theme(axis.title.y = element_blank(), axis.title.y.right = element_blank(),
+        legend.position="bottom", legend.direction="horizontal")
+```
+
+```{r}
+h <- hist(df$state, breaks=2)
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, 1.5))
+```
+
+```{r}
+ggplot(df, aes(x = school, y = perc.passed)) +
+  theme_bw() +
+  geom_bar(stat = "identity")
+```
