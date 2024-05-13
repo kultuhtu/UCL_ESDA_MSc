@@ -1,0 +1,460 @@
+---
+title: "clean"
+output: html_document
+date: '2022-07-14'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+library(imputeTS)
+
+set.seed(100) # For reproducibility
+```
+
+# Import
+
+Working with 3 types of data
+
+-   Gas - gas pulse meter data
+
+-   Heat - heating flow temperature
+
+-   Temperature - internal temperature in the dwelling (various rooms to be averaged)
+
+```{r results = 'hold'}
+setwd('..')
+
+df_heat <- read_csv(
+  "0.data/sensor/home70_hall773_sensor2293_tempprobe_central-heating-flow.csv.gz", show_col_types = FALSE)
+df_gas <- read_csv(
+  "0.data/sensor/home70_hall774_sensor2304_gas-pulse_gas.csv.gz", 
+  show_col_types = FALSE)
+
+df_tbath <- read_csv(
+  "0.data/auxil/home70_bathroom776_sensor2317_room_temperature.csv.gz", show_col_types = FALSE)
+df_tbed1 <- read_csv(
+  "0.data/auxil/home70_bedroom779_sensor2339_room_temperature.csv.gz", show_col_types = FALSE)
+df_tbed2 <- read_csv(
+  "0.data/auxil/home70_bedroom778_sensor2327_room_temperature.csv.gz", show_col_types = FALSE)
+df_thall <- read_csv(
+  "0.data/auxil/home70_bedroom780_sensor2334_room_temperature.csv.gz", show_col_types = FALSE)
+df_tkitch <- read_csv(
+  "0.data/auxil/home70_study775_sensor2312_room_temperature.csv.gz", show_col_types = FALSE)
+df_tlr <- read_csv(
+  "0.data/auxil/home70_kitchenliving777_sensor2321_room_temperature.csv.gz", show_col_types = FALSE)
+
+head(df_gas)
+head(df_heat)
+head(df_tbath)
+head(df_tbed1)
+head(df_tbed2)
+head(df_thall)
+head(df_tkitch)
+head(df_tlr)
+```
+
+## Column names
+
+```{r}
+# gas
+colnames(df_gas) <- c('date','kwh')
+
+# heating flow
+colnames(df_heat) <- c('date','t')
+
+# internal temperatures 
+colnames(df_tbath) <- c('date','T')
+colnames(df_tbed1) <- c('date','T')
+colnames(df_tbed2) <- c('date','T')
+colnames(df_thall) <- c('date','T')
+colnames(df_tkitch) <- c('date','T')
+colnames(df_tlr) <- c('date','T')
+```
+
+# Transform
+
+[Data is transformed in following stages:]{.underline}
+
+-   **Aggregated**: gas to 30 min intervals, temperatures to 5 min intervals
+
+-   **Filter:** filter the date to get full 2017 and first half of 2018, which overlaps in 10 dwellings.
+
+-   **Imputation:** impute sections of missing data by extrapolating the last available value prior to the missing section.
+
+-   **Average**: create a dataset with mean values of all temperature sensors in the house.
+
+## Aggregate
+
+### Gas aggregation
+
+Using 30min intervals for the gas pulse data to replicate the standard gas meter data.
+
+```{r}
+# aggragate gas to 30min intervals
+df_gas_hh <- df_gas %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="30 min")) %>%
+  summarize(kwh = sum(kwh))
+
+head(df_gas_hh)
+```
+
+```{r}
+# fix date format
+df_gas_hh <- df_gas_hh %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_gas_hh <- as_tbl_time(df_gas_hh, date)
+
+head(df_gas_hh)
+```
+
+### Heat aggregation
+
+Aggregating the heating flow temperatures to 5 min intervals, to make the data quicker and easier to handle. Especially useful for creating labels (decreases the variation in temperature trends).
+
+```{r}
+# aggragate heat to 5 min intervals
+df_heat_5 <- df_heat %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(t = mean(t))
+
+head(df_heat_5)
+```
+
+```{r}
+# fix date format
+df_heat_5 <- df_heat_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_heat_5 <- as_tbl_time(df_heat_5, date)
+
+head(df_heat_5)
+```
+
+### Indoor temperature aggregation
+
+Aggregating the indoor temperatures to 5 min intervals, to make the data quicker and easier to handle. Especially useful for creating labels (decreases the variation in temperature trends).
+
+```{r}
+# bathroom to 5 min intervals
+df_tbath_5 <- df_tbath %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(T = mean(T))
+
+# fix date format
+df_tbath_5 <- df_tbath_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tbath_5 <- as_tbl_time(df_tbath_5, date)
+
+
+
+# bedroom 1 to 5 min intervals
+df_tbed1_5 <- df_tbed1 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(T = mean(T))
+
+# fix date format
+df_tbed1_5 <- df_tbed1_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tbed1_5 <- as_tbl_time(df_tbed1_5, date)
+
+
+
+# bedroom 2 to 5 min intervals
+df_tbed2_5 <- df_tbed2 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(T = mean(T))
+
+# fix date format
+df_tbed2_5 <- df_tbed2_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tbed2_5 <- as_tbl_time(df_tbed2_5, date)
+
+
+
+# hall to 5 min intervals
+df_thall_5 <- df_thall %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(T = mean(T))
+
+# fix date format
+df_thall_5 <- df_thall_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_thall_5 <- as_tbl_time(df_thall_5, date)
+
+
+
+# kitchen to 5 min intervals
+df_tkitch_5 <- df_tkitch %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(T = mean(T))
+
+# fix date format
+df_tkitch_5 <- df_tkitch_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tkitch_5 <- as_tbl_time(df_tkitch_5, date)
+
+
+
+# living room to 5 min intervals
+df_tlr_5 <- df_tlr %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="5 min")) %>%
+  summarize(T = mean(T))
+
+# fix date format
+df_tlr_5 <- df_tlr_5 %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tlr_5 <- as_tbl_time(df_tlr_5, date)
+```
+
+## Filter
+
+I decided on this period after looking at the start and end times for different households in the metadata. This period is captured in only 10 households, including this one. My reasoning is that it will allow me to train the algorithm on the full 2017 and test it on the first 5 months of 2018, therefore capturing the full seasonal variation of temperature.
+
+```{r}
+# filter to get 1.5 years that are overlapping with other dwellings
+df_gas_filtered <- df_gas_hh %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+
+head(df_gas_filtered)
+```
+
+```{r}
+# filter to get 1.5 years that are overlapping with other dwellings
+df_heat_filtered <- df_heat_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+
+head(df_heat_filtered)
+```
+
+```{r}
+# filter to get 1.5 years that are overlapping with other dwellings
+df_tbath_filtered <- df_tbath_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+df_tbed1_filtered <- df_tbed1_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+df_tbed2_filtered <- df_tbed2_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+df_thall_filtered <- df_thall_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+df_tkitch_filtered <- df_tkitch_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+df_tlr_filtered <- df_tlr_5 %>%
+  filter_time('2017-01-10' ~ '2018-06-01')
+```
+
+```{r}
+# plot a section in February
+
+df_gas_plot <- df_gas_filtered %>%
+  filter_time('2017-02-01' ~ '2017-02-03')
+
+df_heat_plot <- df_heat_filtered %>%
+  filter_time('2017-02-01' ~ '2017-02-03')
+
+df_tlr_plot <- df_tlr_filtered %>%
+  filter_time('2017-02-01' ~ '2017-02-03')
+
+
+ggplot() +
+  geom_line(data=df_gas_plot, aes(x=date, y=kwh/20), 
+            alpha=0.7,  color="black") +
+  geom_line(data=df_heat_plot, aes(x=date, y=t), 
+            alpha=0.7,  color="red") +
+  geom_line(data=df_tlr_plot, aes(x=date, y=T), 
+            alpha=0.7,  color="blue") +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Home 62: Gas Pulse (black), Heat Flow (red) and Internal Temperature (blue)")
+```
+
+## Missing data
+
+I create time series for the same time period with the same intervals. Then I use the data.table package to merge the original time series, that have missing periods, with the time series I created.
+
+"roll = TRUE" rolls the prevailing value in x forward (last observation carried forward), therefore filling the gaps.
+
+### Gas imputation
+
+```{r}
+# create a 30min interval sequence
+nul <- seq.POSIXt(as.POSIXct("2017-01-10",'%Y-%m-%d %H:%M:%S'), as.POSIXct("2018-06-01",'%Y-%m-%d %H:%M:%S'), by="30 min")
+nul <- seq.POSIXt(as.POSIXlt("2017-01-10"), as.POSIXlt("2018-06-01"), by="30 min")
+nul <- format.POSIXct(nul,'%Y-%m-%d %H:%M:%S')
+
+# get the formats right
+df_nul <- data.frame(date=nul)
+
+df_nul <- df_nul %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_nul <- as_tbl_time(df_nul, date)
+```
+
+```{r results = 'hold'}
+# Merge with the created df
+df_gas_main <- as.data.table(df_gas_filtered)[as.data.table(df_nul), on = .(date), roll = -740]
+df_gas_main <- as_tbl_time(df_gas_main, date)
+
+head(df_gas_main)
+sum(is.na(df_gas_main$kwh))
+```
+
+```{r}
+df_gas_clean <- df_gas_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),112,.)))
+sum(is.na(df_gas_clean$kwh))
+```
+
+### Heat imputation
+
+```{r}
+# create a 30sec interval sequence
+nul <- seq.POSIXt(as.POSIXct("2017-01-10",'%Y-%m-%d %H:%M:%S'), as.POSIXct("2018-06-01",'%Y-%m-%d %H:%M:%S'), by="5 min")
+nul <- seq.POSIXt(as.POSIXlt("2017-01-10"), as.POSIXlt("2018-06-01"), by="5 min")
+nul <- format.POSIXct(nul,'%Y-%m-%d %H:%M:%S')
+
+# get the formats right
+df_nul <- data.frame(date=nul)
+
+df_nul <- df_nul %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_nul <- as_tbl_time(df_nul, date)
+```
+
+```{r results = 'hold'}
+# Merge with the created df
+df_heat_main <- as.data.table(df_heat_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_heat_main <- as_tbl_time(df_heat_main, date)
+
+head(df_heat_main)
+
+sum(is.na(df_heat_main$t))
+```
+
+```{r}
+df_heat_clean <- df_heat_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),200,.)))
+sum(is.na(df_heat_clean$t))
+```
+
+### Indoor temperature imputation
+
+```{r results = 'hold'}
+# Merge with the created df
+df_tbath_main <- as.data.table(df_tbath_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tbath_main <- as_tbl_time(df_tbath_main, date)
+
+df_tbed1_main <- as.data.table(df_tbed1_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tbed1_main <- as_tbl_time(df_tbed1_main, date)
+
+df_tbed2_main <- as.data.table(df_tbed2_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tbed2_main <- as_tbl_time(df_tbed2_main, date)
+
+df_thall_main <- as.data.table(df_thall_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_thall_main <- as_tbl_time(df_thall_main, date)
+
+df_tkitch_main <- as.data.table(df_tkitch_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tkitch_main <- as_tbl_time(df_tkitch_main, date)
+
+df_tlr_main <- as.data.table(df_tlr_filtered)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tlr_main <- as_tbl_time(df_tlr_main, date)
+
+head(df_tbath_main)
+head(df_tbed1_main)
+head(df_tbed2_main)
+head(df_thall_main)
+head(df_tkitch_main)
+head(df_tlr_main)
+
+sum(is.na(df_tbath_main$T))
+sum(is.na(df_tbed1_main$T))
+sum(is.na(df_tbed2_main$T))
+sum(is.na(df_thall_main$T))
+sum(is.na(df_tkitch_main$T))
+sum(is.na(df_tlr_main$T))
+```
+
+```{r results = 'hold'}
+df_tbath_clean <- df_tbath_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),197,.)))
+df_tbed1_clean <- df_tbed1_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),205,.)))
+df_tbed2_clean <- df_tbed2_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),192,.)))
+df_thall_clean <- df_thall_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),202,.)))
+df_tkitch_clean <- df_tkitch_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),185,.)))
+df_tlr_clean <- df_tlr_main %>% group_by(date) %>% mutate_each(funs(ifelse(is.na(.),189,.)))
+
+sum(is.na(df_tbath_clean$T))
+sum(is.na(df_tbed1_clean$T))
+sum(is.na(df_tbed2_clean$T))
+sum(is.na(df_thall_clean$T))
+sum(is.na(df_tkitch_clean$T))
+sum(is.na(df_tlr_clean$T))
+```
+
+## Average temperature
+
+```{r}
+df_tavg_clean <- df_tlr_clean
+
+df_tavg_clean
+```
+
+```{r}
+df_tavg_clean$T <- (df_tbath_clean$T + df_tbed1_clean$T + df_tbed2_clean$T 
+                     + df_thall_clean$T + df_tkitch_clean$T + df_tlr_clean$T)/6
+df_tavg_clean
+```
+
+# Final plot
+
+```{r}
+# plot a section in February
+
+df_gas_plot <- df_gas_clean %>%
+  filter_time('2017-02-01' ~ '2017-02-03')
+
+df_heat_plot <- df_heat_clean %>%
+  filter_time('2017-02-01' ~ '2017-02-03')
+
+df_temperature_plot <- df_tavg_clean %>%
+  filter_time('2017-02-01' ~ '2017-02-03')
+
+
+ggplot() +
+  geom_line(data=df_gas_plot, aes(x=date, y=kwh/20), 
+            alpha=0.7,  color="black") +
+  geom_line(data=df_heat_plot, aes(x=date, y=t), 
+            alpha=0.7,  color="red") +
+  geom_line(data=df_temperature_plot, aes(x=date, y=T), 
+            alpha=0.7,  color="blue") +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Home 62: Gas Pulse (black), Heat Flow (red) and Internal Temperature (blue)")
+```
+
+```{r}
+# save main outputs
+write.csv(df_gas_clean,"outputs/70_gas_clean.csv", row.names = FALSE)
+write.csv(df_heat_clean,"outputs/70_heat_clean.csv", row.names = FALSE)
+write.csv(df_tavg_clean,"outputs/70_tavg_clean.csv", row.names = FALSE)
+write.csv(df_tlr_clean,"outputs/70_tlr_clean.csv", row.names = FALSE)
+```

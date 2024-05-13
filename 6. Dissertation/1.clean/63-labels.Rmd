@@ -1,0 +1,697 @@
+---
+title: "1.labels2"
+output: html_document
+date: "2022-07-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(data.table)
+library(nnet)
+library(partykit)
+library(randomForest)
+library(tidyverse)
+library(tree)
+library(xgboost)
+library(ggplot2)
+library(hrbrthemes)
+library(tibbletime)
+library(anytime)
+library(dplyr)
+
+set.seed(100) # For reproducibility
+```
+
+```{r}
+df_gas <- read_csv("outputs/63_gas_clean.csv", show_col_types = FALSE)
+df_heat <- read_csv("outputs/63_heat_clean.csv", show_col_types = FALSE)
+df_tlr <- read_csv("outputs/63_tlr_clean.csv", show_col_types = FALSE)
+df_tavg <- read_csv("outputs/63_tavg_clean.csv", show_col_types = FALSE)
+```
+
+```{r results = 'hold'}
+## Put date in right format
+
+# gas pulse
+df_gas <- as_tbl_time(df_gas, date)
+#df_gas
+
+# heating flow temperature
+df_heat <- as_tbl_time(df_heat, date)
+#df_heat
+
+# living room temperature
+df_tlr <- as_tbl_time(df_tlr, date)
+#df_tlr
+
+# average indoor temperature
+df_tavg <- as_tbl_time(df_tavg, date)
+#df_tavg
+
+```
+
+# The Workflow
+
+The aim of this workflow is to identify sequences of increasing temperatures over a certain temperature increase threshold as heating operation.
+
+## 1 - Identify t
+
+Filter data for a small section to test and plot
+
+```{r results = 'hold'}
+## FILTER TO TEST ON SMALLER PERIOD
+
+# gas pulse
+df_gas_small <- df_gas #%>%
+  #filter_time('2017-02-20' ~ '2017-02-30')
+#df_gas_small
+
+# heating flow
+df_heat_small <- df_heat #%>%
+  #filter_time('2017-02-20' ~ '2017-02-30')
+#df_heat_small
+
+# living room
+df_tlr_small <- df_tlr #%>%
+  #filter_time('2017-02-20' ~ '2017-02-30')
+#df_tlr_small
+
+# average indoor
+df_tavg_small <- df_tavg #%>%
+  #filter_time('2017-02-20' ~ '2017-02-30')
+#df_tavg_small
+```
+
+```{r results = 'hold'}
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.7,  color="black") +
+  geom_line(data=df_heat_small, aes(x=date, y=t), 
+            alpha=0.7,  color="red") +
+  geom_line(data=df_tlr_small, aes(x=date, y=T*1), 
+            alpha=0.7,  color="blue") +
+  geom_line(data=df_tavg_small, aes(x=date, y=T*1), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("All relevant data")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.7,  color="black") +
+  geom_line(data=df_heat_small, aes(x=date, y=t), 
+            alpha=0.7,  color="red") +
+  xlab("") + ylab("Gas pulse (black) and Heating Flow temperature (red)") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("")
+
+ggplot() +
+  geom_line(data=df_tlr_small, aes(x=date, y=T), 
+            alpha=0.7,  color="blue") +
+  geom_line(data=df_tavg_small, aes(x=date, y=T), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Living room (blue) and Average (purple) temperatures")
+```
+
+## 2 - find dT
+
+Make a column of temperature increment
+
+#### Average indoors
+
+```{r}
+# Create a new column for the dT
+df_tavg_dT <- df_tavg_small
+
+df_tavg_dT['dT'] <- 0
+df_tavg_dT$dT <- as.numeric(df_tavg_dT$dT)
+
+#df_tavg_dT
+```
+
+```{r}
+# Find the dT values
+c = 0
+a = numeric(24)
+
+# This loop just finds the difference between t[n] and t[n+1] and puts that at n+1 in dT column
+for(n in 1:(length(df_tavg_dT$T)-1)){
+  df_tavg_dT$dT[n+1] <- df_tavg_dT$T[n+1] - df_tavg_dT$T[n]
+  c = c+1
+}
+
+df_tavg_dT
+```
+
+#### Living room
+
+```{r}
+# Create a new column for the dT
+df_tlr_dT <- df_tlr_small
+
+df_tlr_dT['dT'] <- 0
+df_tlr_dT$dT <- as.numeric(df_tlr_dT$dT)
+
+#df_tlr_dT
+```
+
+```{r}
+# Find the dT values
+c = 0
+a = numeric(24)
+
+# This loop just finds the difference between t[n] and t[n+1] and puts that at n+1 in dT column
+for(n in 1:(length(df_tlr_dT$T)-1)){
+  df_tlr_dT$dT[n+1] <- df_tlr_dT$T[n+1] - df_tlr_dT$T[n]
+  c = c+1
+}
+
+df_tlr_dT
+```
+
+## 3 - Find sign change
+
+Find points where the increment changes in sign
+
+#### Average indoors
+
+```{r}
+df_tavg_dT['bin'] <- 0
+df_tavg_dT$bin <- as.numeric(df_tavg_dT$bin)
+
+df_tavg_sign <- df_tavg_dT
+df_tavg_sign
+```
+
+```{r}
+# CHANGE OF SIGN IN dT
+
+for(n in 1:(length(df_tavg_sign$bin)-1)){
+  
+  if(df_tavg_sign$dT[n]<0 && df_tavg_sign$dT[n+1]>0 || 
+     df_tavg_sign$dT[n]>0 && df_tavg_sign$dT[n+1]<0 ||
+     df_tavg_sign$dT[n]>0 && df_tavg_sign$dT[n+1]<=0 ||
+     df_tavg_sign$dT[n]<=0 && df_tavg_sign$dT[n+1]>0){
+    
+    df_tavg_sign$bin[n+1]=1
+    
+  } else {next}
+  
+}
+
+df_tavg_sign
+```
+
+#### Living room
+
+```{r}
+df_tlr_dT['bin'] <- 0
+df_tlr_dT$bin <- as.numeric(df_tlr_dT$bin)
+
+df_tlr_sign <- df_tlr_dT
+df_tlr_sign
+```
+
+```{r}
+# CHANGE OF SIGN IN dT
+
+for(n in 1:(length(df_tlr_sign$bin)-1)){
+  
+  if(df_tlr_sign$dT[n]<0 && df_tlr_sign$dT[n+1]>0 || 
+     df_tlr_sign$dT[n]>0 && df_tlr_sign$dT[n+1]<0 ||
+     df_tlr_sign$dT[n]>0 && df_tlr_sign$dT[n+1]<=0 ||
+     df_tlr_sign$dT[n]<=0 && df_tlr_sign$dT[n+1]>0){
+    
+    df_tlr_sign$bin[n+1]=1
+    
+  } else {next}
+  
+}
+
+df_tlr_sign
+```
+
+## 3 - Sums of change
+
+Create sequences of increment that start and end with the change of sign and find the sum of increment for each sequence.
+
+#### Average indoors
+
+```{r}
+# Create a new column for the dT_sum
+df_tavg_changesum <- df_tavg_sign
+df_tavg_changesum
+```
+
+```{r}
+setDT(df_tavg_changesum)[, c('ID', 'sum') := .(1:.N, cumsum(dT)),
+                    shift(cumsum(bin), fill = 0, n=0.5, type="lead")]
+df_tavg_changesum
+```
+
+#### Living room
+
+```{r}
+# Create a new column for the dT_sum
+df_tlr_changesum <- df_tlr_sign
+df_tlr_changesum
+```
+
+```{r}
+setDT(df_tlr_changesum)[, c('ID', 'sum') := .(1:.N, cumsum(dT)),
+                    shift(cumsum(bin), fill = 0, n=0.5, type="lead")]
+df_tlr_changesum
+```
+
+## 4 - Heating on/off
+
+Classify heating as on for the sequence if the sum of the increment of the sequence is larger than 0.75 degrees C
+
+#### Average indoors
+
+```{r}
+df_tavg_state <- df_tavg_changesum %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+
+df_tavg_state <- as_tbl_time(df_tavg_state, date)
+df_tavg_state
+```
+
+```{r}
+df_tavg_state <- df_tavg_state %>%
+  group_by(seq = cumsum(ID == 1)) %>%
+  mutate(state = as.integer(any(sum > 7.5))) %>%
+  ungroup()
+
+df_tavg_state
+```
+
+#### Living room
+
+```{r}
+df_tlr_state <- df_tlr_changesum %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+
+df_tlr_state <- as_tbl_time(df_tlr_state, date)
+df_tlr_state
+```
+
+```{r}
+df_tlr_state <- df_tlr_state %>%
+  group_by(seq = cumsum(ID == 1)) %>%
+  mutate(state = as.integer(any(sum > 7.5))) %>%
+  ungroup()
+
+df_tlr_state
+```
+
+## Final plot
+
+```{r results = 'hold'}
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.7,  color="black") +
+  geom_line(data=df_heat_small, aes(x=date, y=t), 
+            alpha=0.7,  color="red") +
+  geom_line(data=df_tlr_state, aes(x=date, y=T), 
+            alpha=0.7,  color="blue") +
+  geom_line(data=df_tavg_state, aes(x=date, y=T), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas, Heat and Temperature")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_small, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tlr_state, aes(x=date, y=state*700), 
+            alpha=0.7,  color="blue") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by room temperature")
+
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_small, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tavg_state, aes(x=date, y=state*700), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by average temperature")
+
+
+ggplot() +
+  geom_line(data=df_tlr_state, aes(x=date, y=T), 
+            alpha=0.3,  color="blue") +
+  geom_line(data=df_tavg_state, aes(x=date, y=T), 
+            alpha=0.3,  color="purple") +
+  geom_line(data=df_tlr_state, aes(x=date, y=state*215), 
+            alpha=0.7,  color="blue") +
+  coord_cartesian(ylim = c(190, 215)) +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Temperatures: State by room temperature")
+
+ggplot() +
+  geom_line(data=df_tlr_state, aes(x=date, y=T), 
+            alpha=0.3,  color="blue") +
+  geom_line(data=df_tavg_state, aes(x=date, y=T), 
+            alpha=0.3,  color="purple") +
+
+  geom_line(data=df_tavg_state, aes(x=date, y=state*215), 
+            alpha=0.7,  color="purple") +
+  coord_cartesian(ylim = c(190, 215)) +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Temperatures: State by average temperature")
+```
+
+# Cross-check the label accuracy
+
+This is a different way of doing the labels, where I just take the cut off point that is above mean
+
+## Aggregated to hh
+
+#### Heating flow temperature
+
+```{r}
+df_heat_hh <- df_heat_small %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="30 min")) %>%
+  summarize(t = mean(t))
+
+df_heat_hh <- df_heat_hh %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_heat_hh <- as_tbl_time(df_heat_hh, date)
+
+df_heat_hh
+```
+
+```{r}
+df_heat_state <- df_heat_hh
+
+df_heat_state['state'] <- 0
+df_heat_state$state <- as.numeric(df_heat_state$state)
+
+df_heat_state
+```
+
+```{r}
+1.5*mean(df_heat$t)
+```
+
+```{r}
+c = 0
+
+for(n in 1:(length(df_heat_state$t))){
+  if(df_heat_state$t[n]>(450)){df_heat_state$state[n]=1}
+  c = c+1
+}
+
+df_heat_state
+```
+
+```{r results = 'hold'}
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_small, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_heat_state, aes(x=date, y=state*700), 
+            alpha=0.7,  color="brown") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by heat threshold [hh]")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_hh, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tavg_state, aes(x=date, y=state*700), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by average temperature")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_hh, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tlr_state, aes(x=date, y=state*700), 
+            alpha=0.7,  color="blue") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by living room temperature")
+```
+
+#### Internal temperatures (average and living room)
+
+```{r results = 'hold'}
+
+df_tlr_final <- subset(df_tlr_state,select=c('date','T','state'))
+df_tlr_final
+
+df_tavg_final <- subset(df_tavg_state,select=c('date','T','state'))
+df_tavg_final
+```
+
+```{r}
+df_tlr_final <- df_tlr_final %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="30 min")) %>%
+  summarize(T = mean(T), state = max(state))
+
+df_tlr_final <- df_tlr_final %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tlr_final <- as_tbl_time(df_tlr_final, date)
+
+df_tlr_final
+```
+
+```{r}
+df_tavg_final <- df_tavg_final %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S')) %>%
+  group_by(date = cut(date, breaks="30 min")) %>%
+  summarize(T = mean(T), state = max(state))
+
+df_tavg_final <- df_tavg_final %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_tavg_final <- as_tbl_time(df_tavg_final, date)
+
+df_tavg_final
+```
+
+```{r results = 'hold'}
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.7,  color="black") +
+  geom_line(data=df_heat_state, aes(x=date, y=t), 
+            alpha=0.7,  color="red") +
+  geom_line(data=df_tlr_final, aes(x=date, y=T), 
+            alpha=0.7,  color="blue") +
+  geom_line(data=df_tavg_final, aes(x=date, y=T), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas, Heat and Temperature")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_state, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tlr_final, aes(x=date, y=state*700), 
+            alpha=0.7,  color="blue") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by room temperature")
+
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_state, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tavg_final, aes(x=date, y=state*700), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by average temperature")
+
+
+ggplot() +
+  geom_line(data=df_tlr_final, aes(x=date, y=T), 
+            alpha=0.3,  color="blue") +
+  geom_line(data=df_tavg_final, aes(x=date, y=T), 
+            alpha=0.3,  color="purple") +
+  geom_line(data=df_tlr_final, aes(x=date, y=state*215), 
+            alpha=0.7,  color="blue") +
+  coord_cartesian(ylim = c(190, 215)) +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Temperatures: State by room temperature")
+
+ggplot() +
+  geom_line(data=df_tlr_final, aes(x=date, y=T), 
+            alpha=0.3,  color="blue") +
+  geom_line(data=df_tavg_final, aes(x=date, y=T), 
+            alpha=0.3,  color="purple") +
+
+  geom_line(data=df_tavg_final, aes(x=date, y=state*215), 
+            alpha=0.7,  color="purple") +
+  coord_cartesian(ylim = c(190, 215)) +
+  xlab("") + ylab("") +
+  theme_light()+
+  ggtitle("Temperatures: State by average temperature")
+```
+
+```{r results = 'hold'}
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_state, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_heat_state, aes(x=date, y=state*700), 
+            alpha=0.7,  color="brown") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by heat threshold [hh]")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_state, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tavg_final, aes(x=date, y=state*700), 
+            alpha=0.7,  color="purple") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by average temperature")
+
+ggplot() +
+  geom_line(data=df_gas_small, aes(x=date, y=kwh/10), 
+            alpha=0.3,  color="black") +
+  geom_line(data=df_heat_state, aes(x=date, y=t), 
+            alpha=0.3,  color="red") +
+  geom_line(data=df_tlr_final, aes(x=date, y=state*700), 
+            alpha=0.7,  color="blue") +
+  xlab("") + ylab("") +
+  ylim(0,1000) +
+  theme_light()+
+  ggtitle("Gas&Heat: State by living room temperature")
+```
+
+## Final results and merged dataset
+
+```{r}
+df_tavg_final
+df_tlr_final
+df_heat_state
+df_gas_small
+```
+
+### Imputation (needed to join the data)
+
+```{r}
+# create a 30min interval sequence
+nul <- seq.POSIXt(as.POSIXct("2017-01-10",'%Y-%m-%d %H:%M:%S'), as.POSIXct("2018-06-01",'%Y-%m-%d %H:%M:%S'), by="30 min")
+nul <- seq.POSIXt(as.POSIXlt("2017-01-10"), as.POSIXlt("2018-06-01"), by="30 min")
+nul <- format.POSIXct(nul,'%Y-%m-%d %H:%M:%S')
+
+# get the formats right
+df_nul <- data.frame(date=nul)
+
+df_nul <- df_nul %>%
+  mutate(date = as.POSIXct(paste(date), format='%Y-%m-%d %H:%M:%S'))
+df_nul <- as_tbl_time(df_nul, date)
+```
+
+Heat
+
+```{r}
+# Merge with the created df
+df_heat_imp <- as.data.table(df_heat_state)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_heat_imp <- as_tbl_time(df_heat_imp, date)
+
+head(df_heat_imp)
+sum(is.na(df_heat_imp$t))
+```
+
+Average
+
+```{r}
+# Merge with the created df
+df_tavg_imp <- as.data.table(df_tavg_final)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tavg_imp <- as_tbl_time(df_tavg_imp, date)
+
+head(df_tavg_imp)
+sum(is.na(df_tavg_imp$T))
+```
+
+Living room
+
+```{r}
+# Merge with the created df
+df_tlr_imp <- as.data.table(df_tlr_final)[as.data.table(df_nul), on = .(date), roll = TRUE]
+df_tlr_imp <- as_tbl_time(df_tlr_imp, date)
+
+head(df_tlr_imp)
+sum(is.na(df_tlr_imp$T))
+```
+
+### Merge
+
+```{r}
+df_main <- df_gas_small
+df_main
+```
+
+```{r}
+df_main$th <- df_heat_imp$t
+df_main$th_state <- df_heat_imp$state
+df_main$tlr <- df_tlr_imp$T
+df_main$tlr_state <- df_tlr_imp$state
+df_main$tavg <- df_tavg_imp$T
+df_main$tavg_state <- df_tavg_imp$state
+
+df_main
+```
+
+```{r results = 'hold'}
+# Pecentage overlaps
+paste0("Heat flow temp/Living room temp : ", round(100*mean(df_main$th_state==df_main$tlr_state)),"%")
+paste0("Heat flow temp/Average temp : ", round(100*mean(df_main$th_state==df_main$tavg_state)),"%")
+paste0("Average temp/Living room temp : ", round(100*mean(df_main$tavg_state==df_main$tlr_state)),"%")
+```
+
+```{r}
+write.csv(df_main,"outputs/63_main.csv", row.names = FALSE)
+```
