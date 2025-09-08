@@ -5,4 +5,4 @@
 3. (SM) Smart Meter Data: Effect of Temperature Variables on Households Classification [group project]
 4. (Map1) Renewable Investment in Indonesia: A decarbonized electrical supply vision to 2030 (the solar energy case)
 5. (Map2) Reuse of oil and gas assets for CCUS projects in the UK
-6. )Dissertation) Predicting Heating Operation from Smart Meter Data.
+6. (Dissertation) Predicting Heating Operation from Smart Meter Data.
